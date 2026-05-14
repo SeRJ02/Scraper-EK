@@ -85,23 +85,25 @@ var IndiaFreeStuff = (function () {
 
     var shopM = /<a[^>]*class="[^"]*\bbtn-shopnow\b[^"]*"[^>]+href="([^"]+)"/i.exec(block);
     var outbound = shopM ? shopM[1] : null;
-    var amazonLink = null;
+    var buy = null;
     var fetchedDetail = false;
 
     if (outbound) {
-      amazonLink = resolveAmazonLink(outbound);
+      buy = resolveBuyLink(outbound);
     } else if (mayFetchDetail) {
-      // No Shop Now on the card — pull the amazon link from the detail page (via proxy).
+      // No Shop Now on the card — find the outbound link on the detail page.
       try {
         var detail = fetchViaProxy(detailUrl);
         fetchedDetail = true;
-        var amzInDetailM =
+        var outboundInDetailM =
           /href="(https?:\/\/(?:www\.)?amazon\.[a-z.]+\/[^"]+)"/i.exec(detail) ||
           /href="(https?:\/\/amzn\.(?:to|in)\/[^"]+)"/i.exec(detail) ||
+          /href="(https?:\/\/(?:www\.)?flipkart\.com\/[^"]+)"/i.exec(detail) ||
+          /href="(https?:\/\/fkrt\.(?:it|cc)\/[^"]+)"/i.exec(detail) ||
           /href="(https?:\/\/(?:www\.)?indiafreestuff\.in\/\?rto=[^"]+)"/i.exec(detail);
-        if (amzInDetailM) {
-          outbound = amzInDetailM[1];
-          amazonLink = resolveAmazonLink(outbound);
+        if (outboundInDetailM) {
+          outbound = outboundInDetailM[1];
+          buy = resolveBuyLink(outbound);
         }
       } catch (e) {
         console.warn(NAME + ' detail fetch failed for ' + detailUrl + ': ' + e);
@@ -115,9 +117,8 @@ var IndiaFreeStuff = (function () {
       originalPrice: original,
       imageUrl: image,
       sourceLink: detailUrl,
-      amazonLink: amazonLink,
-      // detailUrl is unique per card on indiafreestuff; including title hardens
-      // against accidental rto URL reuse across cards.
+      merchant: buy ? buy.merchant : null,
+      buyLink: buy ? buy.url : null,
       id: sha1Short(detailUrl + '|' + title),
       _fetchedDetail: fetchedDetail
     };

@@ -2,8 +2,8 @@
 // in a single batched setValues call.
 
 var HEADERS = [
-  'Rank', 'Source', 'Title', 'Current Price', 'Original Price',
-  'Image', 'Amazon Link', 'Source Link'
+  'Rank', 'Source', 'Merchant', 'Title', 'Current Price', 'Original Price',
+  'Image', 'Buy Link', 'Source Link'
 ];
 
 function getSheet() {
@@ -30,8 +30,8 @@ function ensureHeader(sheet) {
   if (needs) {
     sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]).setFontWeight('bold');
     sheet.setFrozenRows(1);
-    sheet.setColumnWidth(3, 320); // Title
-    sheet.setColumnWidth(6, 120); // Image
+    sheet.setColumnWidth(4, 320); // Title (now column D after adding Merchant)
+    sheet.setColumnWidth(7, 120); // Image (now column G)
     sheet.setRowHeights(2, CONFIG.MAX_ROWS, 90);
   }
 }
@@ -42,19 +42,23 @@ function writeTopDeals(deals) {
   for (var i = 0; i < CONFIG.MAX_ROWS; i++) {
     var d = deals[i];
     if (!d) {
-      rows.push(['', '', '', '', '', '', '', '']);
+      rows.push(['', '', '', '', '', '', '', '', '']);
       continue;
     }
+    var merchant = d.merchant || '';
+    var buyLabel = merchant === 'amazon' ? 'Open on Amazon'
+                  : merchant === 'flipkart' ? 'Open on Flipkart'
+                  : 'Open';
+    var buyLink = d.buyLink || d.amazonLink || null;  // tolerate legacy field name
     rows.push([
       i + 1,
       d.source || '',
+      merchant,
       d.title || '',
       d.currentPrice == null ? '' : d.currentPrice,
       d.originalPrice == null ? '' : d.originalPrice,
       d.imageUrl ? '=IMAGE("' + escapeFormula(d.imageUrl) + '")' : '',
-      d.amazonLink
-        ? '=HYPERLINK("' + escapeFormula(d.amazonLink) + '","Open on Amazon")'
-        : '',
+      buyLink ? '=HYPERLINK("' + escapeFormula(buyLink) + '","' + buyLabel + '")' : '',
       d.sourceLink || ''
     ]);
   }

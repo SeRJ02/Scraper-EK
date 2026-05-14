@@ -58,12 +58,14 @@ var BigTricks = (function () {
     // Strip the absolute-positioned overlay span and any other inline tags.
     var title = stripTags(titleM[2]);
 
-    // Amazon shortlink — usually on the thumb anchor, also repeated on the "Shop" button.
-    var amazonOutboundM =
+    // Outbound link — could be an amzn.to / amazon.in or a flipkart shortlink.
+    var outboundM =
       /href="(https?:\/\/amzn\.(?:to|in)\/[^"]+)"/i.exec(block) ||
-      /href="(https?:\/\/(?:www\.)?amazon\.[a-z.]+\/[^"]+)"/i.exec(block);
-    var outbound = amazonOutboundM ? amazonOutboundM[1] : null;
-    var amazonLink = outbound ? resolveAmazonLink(outbound) : null;
+      /href="(https?:\/\/(?:www\.)?amazon\.[a-z.]+\/[^"]+)"/i.exec(block) ||
+      /href="(https?:\/\/fkrt\.(?:it|cc)\/[^"]+)"/i.exec(block) ||
+      /href="(https?:\/\/(?:www\.)?flipkart\.com\/[^"]+)"/i.exec(block);
+    var outbound = outboundM ? outboundM[1] : null;
+    var buy = outbound ? resolveBuyLink(outbound) : null;
 
     // Image: prefer data-src (lazy-load real URL) over src (often a placeholder).
     var imgTagM = /<img\b[^>]*>/i.exec(block);
@@ -92,8 +94,9 @@ var BigTricks = (function () {
       originalPrice: original,
       imageUrl: image,
       sourceLink: detailUrl,
-      amazonLink: amazonLink,
-      id: sha1Short(amazonLink || outbound || detailUrl || title)
+      merchant: buy ? buy.merchant : null,
+      buyLink: buy ? buy.url : null,
+      id: sha1Short(detailUrl + '|' + title)
     };
   }
 
