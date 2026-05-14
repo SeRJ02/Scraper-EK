@@ -22,7 +22,7 @@
 
 var IndiaFreeStuff = (function () {
   var NAME = 'indiafreestuff';
-  var BASE = 'https://www.indiafreestuff.in/';
+  var BASE = 'https://www.indiafreestuff.in/deals/trending';
   var MAX_CARDS = 25;
 
   function fetch() {
@@ -93,7 +93,7 @@ function _testIndiaFreeStuff() {
 
 // Run this once to see what the server actually returns to Apps Script.
 function _debugIndiaFreeStuff() {
-  var html = fetchHtml('https://www.indiafreestuff.in/');
+  var html = fetchHtml('https://www.indiafreestuff.in/deals/trending');
   console.log('Response length: ' + html.length);
   console.log('Has <title>: ' + (/<title>([^<]+)<\/title>/i.exec(html) || ['n/a'])[1]);
   console.log('product-outer occurrences: ' + (html.match(/product-outer/g) || []).length);
