@@ -44,7 +44,9 @@ function resolveBuyLink(url) {
   var host = hostM[1];
   if (AMAZON_HOST_RE.test(host))   return { url: cleanAmazon(current),   merchant: 'amazon' };
   if (FLIPKART_HOST_RE.test(host)) return { url: cleanFlipkart(current), merchant: 'flipkart' };
-  return null;
+  // Unknown merchant (Myntra, Ajio, etc.) — still surface the URL so the
+  // sheet has a clickable link. Use the host as the merchant label.
+  return { url: current.split('?')[0], merchant: host.replace(/^www\./, '') };
 }
 
 function resolveAmazonLink(url) {

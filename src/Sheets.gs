@@ -48,6 +48,7 @@ function writeTopDeals(deals) {
     var merchant = d.merchant || '';
     var buyLabel = merchant === 'amazon' ? 'Open on Amazon'
                   : merchant === 'flipkart' ? 'Open on Flipkart'
+                  : merchant ? 'Open on ' + merchant
                   : 'Open';
     var buyLink = d.buyLink || d.amazonLink || null;  // tolerate legacy field name
     rows.push([
