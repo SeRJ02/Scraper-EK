@@ -60,8 +60,8 @@ function setup() {
     .everyMinutes(CONFIG.POLL_MINUTES)
     .create();
   console.log('Installed runScrape trigger every ' + CONFIG.POLL_MINUTES + ' minutes.');
-  // Touch the sheet so the user sees the header immediately.
-  writeTopDeals([]);
+  // Make sure the header exists without disturbing any data already in the sheet.
+  getSheet();
 }
 
 // Remove any existing runScrape triggers.
