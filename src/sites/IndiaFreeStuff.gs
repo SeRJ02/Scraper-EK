@@ -32,7 +32,10 @@ var IndiaFreeStuff = (function () {
   var MAX_DETAIL_FETCHES = 10;  // cap detail-page fetches to stay under the 6-min budget
 
   function fetch() {
-    var html = fetchHtml(ENDPOINT, xhrHeaders());
+    var cookie = primeCookies();
+    var headers = xhrHeaders();
+    if (cookie) headers['Cookie'] = cookie;
+    var html = fetchHtml(ENDPOINT, headers);
     var cards = splitCards(html).slice(0, MAX_CARDS);
     var deals = [];
     var detailFetched = 0;
@@ -49,6 +52,37 @@ var IndiaFreeStuff = (function () {
       }
     }
     return deals;
+  }
+
+  // GET the homepage to obtain whatever session cookies the site issues, then
+  // return them as a single "name=value; name=value" string for the Cookie header.
+  function primeCookies() {
+    try {
+      var resp = UrlFetchApp.fetch('https://www.indiafreestuff.in/', {
+        method: 'get',
+        followRedirects: true,
+        muteHttpExceptions: true,
+        headers: {
+          'User-Agent': CONFIG.USER_AGENT,
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-IN,en;q=0.9',
+          'Upgrade-Insecure-Requests': '1'
+        }
+      });
+      var hdrs = resp.getAllHeaders();
+      var sc = hdrs['Set-Cookie'] || hdrs['set-cookie'];
+      if (!sc) return '';
+      var arr = Array.isArray(sc) ? sc : [sc];
+      var pairs = [];
+      for (var i = 0; i < arr.length; i++) {
+        var nv = String(arr[i]).split(';')[0].trim();
+        if (nv) pairs.push(nv);
+      }
+      return pairs.join('; ');
+    } catch (e) {
+      console.warn(NAME + ' cookie prime failed: ' + e);
+      return '';
+    }
   }
 
   // Headers matching what the live site sends for this XHR (CORS, same-origin).
@@ -140,17 +174,42 @@ function _testIndiaFreeStuff() {
 }
 
 function _debugIndiaFreeStuff() {
-  var html = fetchHtml('https://www.indiafreestuff.in/pages/getdeals', {
+  // Step 1: prime
+  var resp = UrlFetchApp.fetch('https://www.indiafreestuff.in/', {
+    method: 'get', followRedirects: true, muteHttpExceptions: true,
+    headers: {
+      'User-Agent': CONFIG.USER_AGENT,
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-IN,en;q=0.9'
+    }
+  });
+  console.log('Homepage status: ' + resp.getResponseCode());
+  var hdrs = resp.getAllHeaders();
+  var sc = hdrs['Set-Cookie'] || hdrs['set-cookie'] || '';
+  console.log('Set-Cookie (raw): ' + JSON.stringify(sc).substring(0, 400));
+  var arr = Array.isArray(sc) ? sc : (sc ? [sc] : []);
+  var pairs = arr.map(function (c) { return String(c).split(';')[0].trim(); }).filter(Boolean);
+  var cookie = pairs.join('; ');
+  console.log('Cookie to replay: ' + (cookie || '(none)'));
+
+  // Step 2: XHR with cookie
+  var headers = {
     'Referer': 'https://www.indiafreestuff.in/',
     'X-Requested-With': 'XMLHttpRequest',
     'Accept': '*/*',
     'Sec-Fetch-Dest': 'empty',
     'Sec-Fetch-Mode': 'cors',
     'Sec-Fetch-Site': 'same-origin'
-  });
-  console.log('Length: ' + html.length);
-  console.log('product-outer: ' + (html.match(/product-outer/g) || []).length);
-  console.log('item-title: ' + (html.match(/item-title/g) || []).length);
-  console.log('btn-shopnow: ' + (html.match(/btn-shopnow/g) || []).length);
-  console.log('First 400 chars:\n' + html.substring(0, 400));
+  };
+  if (cookie) headers['Cookie'] = cookie;
+  try {
+    var html = fetchHtml('https://www.indiafreestuff.in/pages/getdeals', headers);
+    console.log('XHR status: 200, length=' + html.length);
+    console.log('product-outer: ' + (html.match(/product-outer/g) || []).length);
+    console.log('item-title: ' + (html.match(/item-title/g) || []).length);
+    console.log('btn-shopnow: ' + (html.match(/btn-shopnow/g) || []).length);
+    console.log('First 400 chars:\n' + html.substring(0, 400));
+  } catch (e) {
+    console.log('XHR FAILED: ' + e);
+  }
 }
