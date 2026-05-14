@@ -33,6 +33,25 @@ function fetchJson(url) {
   return JSON.parse(fetchHtml(url));
 }
 
+// Fetch via the Cloudflare Worker proxy (for hosts that 403 Apps Script's IP).
+// Worker URL + token live in Script Properties; if not set, throws so the
+// caller can fall back / log clearly.
+function fetchViaProxy(targetUrl) {
+  var props = PropertiesService.getScriptProperties();
+  var base = props.getProperty(CONFIG.PROP_WORKER_URL);
+  var token = props.getProperty(CONFIG.PROP_WORKER_TOKEN);
+  if (!base || !token) {
+    throw new Error(
+      'Proxy not configured. Set Script Properties ' +
+      CONFIG.PROP_WORKER_URL + ' and ' + CONFIG.PROP_WORKER_TOKEN + '.'
+    );
+  }
+  var proxied = base.replace(/\/+$/, '') +
+    '/?url=' + encodeURIComponent(targetUrl) +
+    '&token=' + encodeURIComponent(token);
+  return fetchHtml(proxied);
+}
+
 // Short stable id for deduplication.
 function sha1Short(str) {
   var bytes = Utilities.computeDigest(

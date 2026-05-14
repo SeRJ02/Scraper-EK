@@ -10,5 +10,7 @@ var CONFIG = {
     '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   STATE_KEY_SEEN: 'seenIds',
   STATE_KEY_TOP: 'topDeals',
-  PROP_SHEET_ID: 'SHEET_ID'
+  PROP_SHEET_ID: 'SHEET_ID',
+  PROP_WORKER_URL: 'PROXY_WORKER_URL',     // e.g. https://my-proxy.workers.dev
+  PROP_WORKER_TOKEN: 'PROXY_WORKER_TOKEN'  // shared secret matching the Worker
 };

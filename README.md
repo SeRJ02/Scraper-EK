@@ -94,6 +94,48 @@ After changing `POLL_MINUTES`, run `setup()` again (it calls `teardown()` first)
 
 ---
 
+## Cloudflare Worker proxy (required for IndiaFreeStuff)
+
+`indiafreestuff.in` 403s requests from Google Cloud IP ranges, so Apps Script
+can't hit it directly. A tiny Cloudflare Worker (free tier, 100k req/day) acts
+as a relay.
+
+### Deploy the Worker
+
+1. Sign in to https://dash.cloudflare.com (free account if you don't have one).
+2. **Workers & Pages → Create application → Create Worker**. Give it a name
+   (e.g. `scraper-ek-proxy`). Click **Deploy**.
+3. Click **Edit code**. Replace the template with the contents of
+   `worker/index.js` from this repo (raw URL):
+   https://raw.githubusercontent.com/SeRJ02/Scraper-EK/claude/build-price-tracker-scraper-Pru7z/worker/index.js
+4. **Save and deploy**.
+5. Back on the Worker overview → **Settings → Variables and Secrets → Add**:
+   - `PROXY_TOKEN` (encrypt) — any long random string (e.g. `openssl rand -hex 32`)
+   - `ALLOWED_HOSTS` — `www.indiafreestuff.in,indiafreestuff.in`
+6. Copy the Worker URL from the overview tab — it looks like
+   `https://scraper-ek-proxy.<your-subdomain>.workers.dev`.
+
+### Tell Apps Script about the Worker
+
+In the Apps Script editor → **Project Settings → Script Properties → Add**:
+
+- `PROXY_WORKER_URL` = the Worker URL from step 6
+- `PROXY_WORKER_TOKEN` = the same value you set as `PROXY_TOKEN`
+
+That's it — `IndiaFreeStuff.gs` now goes through the Worker automatically.
+
+### Verify
+
+Run `_debugIndiaFreeStuff` in the editor. You should see something like:
+```
+OK length=42137
+product-outer: 24
+item-title: 24
+btn-shopnow: 22
+```
+
+---
+
 ## Limitations
 
 - **PriceBefore** and **Price-History** may render their deal lists with
