@@ -21,6 +21,14 @@ var SOURCE_HOST_RE = /(^|\.)indiafreestuff\.in$|(^|\.)bigtricks\.in$|(^|\.)price
 function resolveBuyLink(url) {
   if (!url) return null;
   var current = url;
+  // Source sites (indiafreestuff, bigtricks) block Apps Script's IP. If the
+  // starting URL is on one of those hosts, use the Worker to chase redirects
+  // from Cloudflare's edge; once we have the final URL, classify it below.
+  var startHostM = /^https?:\/\/([^\/]+)/i.exec(current);
+  if (startHostM && SOURCE_HOST_RE.test(startHostM[1])) {
+    var viaProxy = proxyResolveUrl(current);
+    if (viaProxy) current = viaProxy;
+  }
   for (var i = 0; i < 8; i++) {
     var resp;
     try {

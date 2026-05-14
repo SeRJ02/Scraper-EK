@@ -37,6 +37,26 @@ function fetchJson(url) {
 // Worker URL + token live in Script Properties; if not set, throws so the
 // caller can fall back / log clearly.
 function fetchViaProxy(targetUrl) {
+  return proxyCall('', targetUrl);
+}
+
+// Ask the Worker to follow redirects on targetUrl and return the final URL.
+// Used for ?rto= redirector links the source sites use to mask outbound
+// retailer URLs — Apps Script's IP is blocked, so we can't chase those
+// redirects directly.
+function proxyResolveUrl(targetUrl) {
+  var props = PropertiesService.getScriptProperties();
+  if (!props.getProperty(CONFIG.PROP_WORKER_URL)) return null;
+  try {
+    var body = proxyCall('/resolve', targetUrl);
+    var data = JSON.parse(body);
+    return data && data.url ? data.url : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function proxyCall(path, targetUrl) {
   var props = PropertiesService.getScriptProperties();
   var base = props.getProperty(CONFIG.PROP_WORKER_URL);
   var token = props.getProperty(CONFIG.PROP_WORKER_TOKEN);
@@ -46,8 +66,8 @@ function fetchViaProxy(targetUrl) {
       CONFIG.PROP_WORKER_URL + ' and ' + CONFIG.PROP_WORKER_TOKEN + '.'
     );
   }
-  var proxied = base.replace(/\/+$/, '') +
-    '/?url=' + encodeURIComponent(targetUrl) +
+  var proxied = base.replace(/\/+$/, '') + path +
+    '?url=' + encodeURIComponent(targetUrl) +
     '&token=' + encodeURIComponent(token);
   return fetchHtml(proxied);
 }
