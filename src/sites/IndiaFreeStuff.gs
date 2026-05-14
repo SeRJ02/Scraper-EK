@@ -116,7 +116,9 @@ var IndiaFreeStuff = (function () {
       imageUrl: image,
       sourceLink: detailUrl,
       amazonLink: amazonLink,
-      id: sha1Short(amazonLink || outbound || detailUrl || title),
+      // detailUrl is unique per card on indiafreestuff; including title hardens
+      // against accidental rto URL reuse across cards.
+      id: sha1Short(detailUrl + '|' + title),
       _fetchedDetail: fetchedDetail
     };
   }
