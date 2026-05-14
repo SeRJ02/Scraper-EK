@@ -90,3 +90,20 @@ var IndiaFreeStuff = (function () {
 function _testIndiaFreeStuff() {
   console.log(JSON.stringify(IndiaFreeStuff.fetch().slice(0, 3), null, 2));
 }
+
+// Run this once to see what the server actually returns to Apps Script.
+function _debugIndiaFreeStuff() {
+  var html = fetchHtml('https://www.indiafreestuff.in/');
+  console.log('Response length: ' + html.length);
+  console.log('Has <title>: ' + (/<title>([^<]+)<\/title>/i.exec(html) || ['n/a'])[1]);
+  console.log('product-outer occurrences: ' + (html.match(/product-outer/g) || []).length);
+  console.log('product-item occurrences: ' + (html.match(/product-item/g) || []).length);
+  console.log('item-title occurrences: ' + (html.match(/item-title/g) || []).length);
+  console.log('First 600 chars:\n' + html.substring(0, 600));
+  // Print a window around the first product-outer hit, if any.
+  var idx = html.indexOf('product-outer');
+  if (idx >= 0) {
+    console.log('--- first product-outer context ---\n' +
+      html.substring(Math.max(0, idx - 100), idx + 600));
+  }
+}
