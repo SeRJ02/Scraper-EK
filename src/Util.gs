@@ -1,15 +1,27 @@
 // Generic helpers: HTTP fetch, hashing, price parsing, regex helpers.
 
-function fetchHtml(url) {
+function fetchHtml(url, extraHeaders) {
+  var headers = {
+    'User-Agent': CONFIG.USER_AGENT,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-IN,en-US;q=0.9,en;q=0.8',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache'
+  };
+  if (extraHeaders) {
+    for (var k in extraHeaders) headers[k] = extraHeaders[k];
+  }
   var resp = UrlFetchApp.fetch(url, {
     method: 'get',
     followRedirects: true,
     muteHttpExceptions: true,
-    headers: {
-      'User-Agent': CONFIG.USER_AGENT,
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'en-IN,en;q=0.9'
-    }
+    headers: headers
   });
   if (resp.getResponseCode() >= 400) {
     throw new Error('HTTP ' + resp.getResponseCode() + ' for ' + url);

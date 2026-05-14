@@ -26,7 +26,7 @@ var IndiaFreeStuff = (function () {
   var MAX_CARDS = 25;
 
   function fetch() {
-    var html = fetchHtml(BASE);
+    var html = fetchWithFallback();
     var cards = splitCards(html).slice(0, MAX_CARDS);
     var deals = [];
     for (var i = 0; i < cards.length; i++) {
@@ -38,6 +38,24 @@ var IndiaFreeStuff = (function () {
       }
     }
     return deals;
+  }
+
+  // Try /deals/trending first; fall back to homepage if it 403s.
+  function fetchWithFallback() {
+    var urls = [
+      'https://www.indiafreestuff.in/deals/trending',
+      'https://www.indiafreestuff.in/'
+    ];
+    var lastErr;
+    for (var i = 0; i < urls.length; i++) {
+      try {
+        return fetchHtml(urls[i], { 'Referer': 'https://www.indiafreestuff.in/' });
+      } catch (e) {
+        lastErr = e;
+        console.warn(NAME + ' fetch ' + urls[i] + ' failed: ' + e);
+      }
+    }
+    throw lastErr;
   }
 
   // Slice the page into per-card HTML blocks by anchoring on the product-outer wrapper.
@@ -91,19 +109,29 @@ function _testIndiaFreeStuff() {
   console.log(JSON.stringify(IndiaFreeStuff.fetch().slice(0, 3), null, 2));
 }
 
-// Run this once to see what the server actually returns to Apps Script.
+// Probe each candidate URL and dump what we got back.
 function _debugIndiaFreeStuff() {
-  var html = fetchHtml('https://www.indiafreestuff.in/deals/trending');
-  console.log('Response length: ' + html.length);
-  console.log('Has <title>: ' + (/<title>([^<]+)<\/title>/i.exec(html) || ['n/a'])[1]);
-  console.log('product-outer occurrences: ' + (html.match(/product-outer/g) || []).length);
-  console.log('product-item occurrences: ' + (html.match(/product-item/g) || []).length);
-  console.log('item-title occurrences: ' + (html.match(/item-title/g) || []).length);
-  console.log('First 600 chars:\n' + html.substring(0, 600));
-  // Print a window around the first product-outer hit, if any.
-  var idx = html.indexOf('product-outer');
-  if (idx >= 0) {
-    console.log('--- first product-outer context ---\n' +
-      html.substring(Math.max(0, idx - 100), idx + 600));
+  var urls = [
+    'https://www.indiafreestuff.in/deals/trending',
+    'https://www.indiafreestuff.in/'
+  ];
+  for (var i = 0; i < urls.length; i++) {
+    console.log('\n=== ' + urls[i] + ' ===');
+    try {
+      var html = fetchHtml(urls[i], { 'Referer': 'https://www.indiafreestuff.in/' });
+      console.log('OK length=' + html.length);
+      console.log('<title>: ' + (/<title>([^<]+)<\/title>/i.exec(html) || ['n/a'])[1]);
+      console.log('product-outer: ' + (html.match(/product-outer/g) || []).length);
+      console.log('product-item: ' + (html.match(/product-item/g) || []).length);
+      console.log('item-title: ' + (html.match(/item-title/g) || []).length);
+      console.log('First 400 chars:\n' + html.substring(0, 400));
+      var idx = html.indexOf('product-outer');
+      if (idx >= 0) {
+        console.log('--- first product-outer context ---\n' +
+          html.substring(Math.max(0, idx - 80), idx + 500));
+      }
+    } catch (e) {
+      console.log('FAILED: ' + e);
+    }
   }
 }
