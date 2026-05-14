@@ -1,99 +1,100 @@
 // Scraper for https://www.bigtricks.in/
-// Same shape as IndiaFreeStuff — WordPress posts with an outbound deal link.
+//
+// DOM (verified live):
+//   <article data-post-type="deal">
+//     <div class="bt-card-inner">
+//       <a class="bt-card-thumb" href="https://amzn.to/XXXXXXX" target="_blank">
+//         <img data-src="https://m.media-amazon.com/images/I/....jpg" src="...">
+//       </a>
+//       <div class="p-5 sm:p-6 ...">
+//         <h2>
+//           <a href="https://www.bigtricks.in/deal/SLUG/">
+//             <span aria-hidden="true"></span>
+//             TITLE
+//           </a>
+//         </h2>
+//         <div class="flex items-baseline gap-3 mb-3">
+//           <span class="text-2xl ... text-primary-600">₹124</span>
+//           <span class="... line-through ...">₹365</span>
+//         </div>
+//         ...
+//       </div>
+//     </div>
+//   </article>
 
 var BigTricks = (function () {
   var NAME = 'bigtricks';
   var BASE = 'https://www.bigtricks.in/';
-  var MAX_POSTS_PER_RUN = 15;
+  var MAX_CARDS = 25;
 
   function fetch() {
     var html = fetchHtml(BASE);
-    var posts = extractPosts(html).slice(0, MAX_POSTS_PER_RUN);
+    var cards = extractArticles(html).slice(0, MAX_CARDS);
     var deals = [];
-    for (var i = 0; i < posts.length; i++) {
+    for (var i = 0; i < cards.length; i++) {
       try {
-        var d = buildDeal(posts[i]);
+        var d = parseCard(cards[i]);
         if (d) deals.push(d);
       } catch (e) {
-        console.warn(NAME + ' post failed: ' + e);
+        console.warn(NAME + ' card ' + i + ' failed: ' + e);
       }
     }
     return deals;
   }
 
-  function extractPosts(html) {
+  function extractArticles(html) {
     var out = [];
-    var re = /<article\b[^>]*>([\s\S]*?)<\/article>/gi;
+    var re = /<article\b[^>]*data-post-type="deal"[^>]*>([\s\S]*?)<\/article>/gi;
     var m;
-    while ((m = re.exec(html)) !== null) {
-      var block = m[1];
-      var titleMatch =
-        /<h[12][^>]*class="[^"]*entry-title[^"]*"[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(block) ||
-        /<h[12][^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
-      if (!titleMatch) continue;
-      var imgMatch = /<img[^>]+src="([^"]+)"/i.exec(block);
-      out.push({
-        url: titleMatch[1],
-        title: stripTags(titleMatch[2]),
-        image: imgMatch ? imgMatch[1] : ''
-      });
-    }
+    while ((m = re.exec(html)) !== null) out.push(m[1]);
     return out;
   }
 
-  function buildDeal(post) {
-    var detail;
-    try { detail = fetchHtml(post.url); }
-    catch (e) { return null; }
+  function parseCard(block) {
+    // Detail-page link + title come from the h2 anchor.
+    var titleM = /<h2[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<\/h2>/i.exec(block);
+    if (!titleM) return null;
+    var detailUrl = titleM[1];
+    // Strip the absolute-positioned overlay span and any other inline tags.
+    var title = stripTags(titleM[2]);
 
-    var outbound = findOutboundLink(detail);
+    // Amazon shortlink — usually on the thumb anchor, also repeated on the "Shop" button.
+    var amazonOutboundM =
+      /href="(https?:\/\/amzn\.(?:to|in)\/[^"]+)"/i.exec(block) ||
+      /href="(https?:\/\/(?:www\.)?amazon\.[a-z.]+\/[^"]+)"/i.exec(block);
+    var outbound = amazonOutboundM ? amazonOutboundM[1] : null;
     var amazonLink = outbound ? resolveAmazonLink(outbound) : null;
-    var prices = findPrices(detail);
-    var image = post.image || findOgImage(detail);
+
+    // Image: prefer data-src (lazy-load real URL) over src (often a placeholder).
+    var imgTagM = /<img\b[^>]*>/i.exec(block);
+    var image = '';
+    if (imgTagM) {
+      image = attr(imgTagM[0], 'data-src') ||
+              attr(imgTagM[0], 'data-lazy-src') ||
+              attr(imgTagM[0], 'src') ||
+              '';
+    }
+
+    // Prices: line-through span = MRP; the other ₹ number nearby = current.
+    var mrpM = /<span[^>]*class="[^"]*\bline-through\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i.exec(block);
+    var original = mrpM ? parsePrice(stripTags(mrpM[1])) : null;
+
+    var current = null;
+    // First ₹-prefixed number that isn't inside the line-through span.
+    var withoutMrp = mrpM ? block.replace(mrpM[0], '') : block;
+    var curM = /(?:₹|Rs\.?\s*|INR\s*)([\d,]+(?:\.\d+)?)/i.exec(withoutMrp);
+    if (curM) current = parsePrice(curM[1]);
 
     return {
       source: NAME,
-      title: post.title,
-      currentPrice: prices.current,
-      originalPrice: prices.original,
+      title: title,
+      currentPrice: current,
+      originalPrice: original,
       imageUrl: image,
-      sourceLink: post.url,
+      sourceLink: detailUrl,
       amazonLink: amazonLink,
-      id: sha1Short(amazonLink || outbound || post.url || post.title)
+      id: sha1Short(amazonLink || outbound || detailUrl || title)
     };
-  }
-
-  function findOutboundLink(html) {
-    var patterns = [
-      /href="(https?:\/\/[^"]*amazon\.[a-z.]+\/[^"]+)"/i,
-      /href="(https?:\/\/amzn\.(?:to|in)\/[^"]+)"/i,
-      /href="(https?:\/\/(?:www\.)?bigtricks\.in\/go\/[^"]+)"/i,
-      /href="(https?:\/\/(?:www\.)?bigtricks\.in\/out\/[^"]+)"/i,
-      /href="(https?:\/\/(?:www\.)?flipkart\.com\/[^"]+)"/i
-    ];
-    for (var i = 0; i < patterns.length; i++) {
-      var m = patterns[i].exec(html);
-      if (m) return m[1];
-    }
-    return null;
-  }
-
-  function findPrices(html) {
-    var current = null, original = null;
-    var mrp = /(?:MRP|M\.R\.P|Original Price|Regular Price)[^0-9₹]{0,20}(?:₹|Rs\.?|INR)?\s*([\d,]+(?:\.\d+)?)/i.exec(html);
-    if (mrp) original = parsePrice(mrp[1]);
-    var deal = /(?:Deal Price|Offer Price|Now|Price)[^0-9₹]{0,20}(?:₹|Rs\.?|INR)?\s*([\d,]+(?:\.\d+)?)/i.exec(html);
-    if (deal) current = parsePrice(deal[1]);
-    if (current == null) {
-      var first = /(?:₹|Rs\.?\s*|INR\s*)([\d,]+(?:\.\d+)?)/i.exec(html);
-      if (first) current = parsePrice(first[1]);
-    }
-    return { current: current, original: original };
-  }
-
-  function findOgImage(html) {
-    var m = /<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i.exec(html);
-    return m ? m[1] : '';
   }
 
   return { name: NAME, fetch: fetch };
