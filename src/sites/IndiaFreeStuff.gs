@@ -1,117 +1,92 @@
 // Scraper for https://www.indiafreestuff.in/
-// WordPress-style listing of deal posts. Each post links to a detail page
-// that contains the outbound Amazon/Flipkart link and prices.
 //
-// Selectors here target the common .post / .entry-* WordPress markup. If
-// IndiaFreeStuff's theme uses different class names, adjust LISTING_POST_RE
-// and the detail-page price/link patterns below.
+// DOM (verified live):
+//   <div class="col-xs-3 product-outer">
+//     <div class="product-item">
+//       <a class="product-img" href="DETAIL_URL"><img src="IMG"></a>
+//       <a class="item-title"  href="DETAIL_URL">TITLE</a>
+//       <div class="price-wrap">
+//         <div class="old-price"><p><i class="fa fa-inr"></i> 415 </p></div>
+//         <div class="new-price"><p><i class="fa fa-inr"></i> 225 </p></div>
+//       </div>
+//       <div class="product-footer">
+//         <div class="logo-shop-now">
+//           <a class="btn btn-shopnow ripplelink" href="https://www.indiafreestuff.in/?rto=XXX">Shop Now</a>
+//         </div>
+//       </div>
+//     </div>
+//   </div>
+//
+// The `?rto=` URL is a server-side 30x redirect to the actual Amazon/Flipkart
+// product page. We chase it via Amazon.resolveAmazonLink.
 
 var IndiaFreeStuff = (function () {
   var NAME = 'indiafreestuff';
   var BASE = 'https://www.indiafreestuff.in/';
-  var MAX_POSTS_PER_RUN = 15;
+  var MAX_CARDS = 25;
 
   function fetch() {
     var html = fetchHtml(BASE);
-    var posts = extractPosts(html).slice(0, MAX_POSTS_PER_RUN);
+    var cards = splitCards(html).slice(0, MAX_CARDS);
     var deals = [];
-    for (var i = 0; i < posts.length; i++) {
+    for (var i = 0; i < cards.length; i++) {
       try {
-        var d = buildDeal(posts[i]);
+        var d = parseCard(cards[i]);
         if (d) deals.push(d);
       } catch (e) {
-        console.warn(NAME + ' post failed: ' + e);
+        console.warn(NAME + ' card ' + i + ' failed: ' + e);
       }
     }
     return deals;
   }
 
-  // Pull <article>...</article> blocks from the listing HTML.
-  function extractPosts(html) {
-    var out = [];
-    var re = /<article\b[^>]*>([\s\S]*?)<\/article>/gi;
+  // Slice the page into per-card HTML blocks by anchoring on the product-outer wrapper.
+  function splitCards(html) {
+    var positions = [];
+    var re = /<div\s+class="col-xs-\d+\s+product-outer"[^>]*>/gi;
     var m;
-    while ((m = re.exec(html)) !== null) {
-      var block = m[1];
-      var linkMatch = /<a[^>]+href="([^"]+)"[^>]*>[\s\S]*?<\/a>/i.exec(block);
-      var titleMatch =
-        /<h2[^>]*class="[^"]*entry-title[^"]*"[^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/i.exec(block) ||
-        /<h2[^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/i.exec(block);
-      var imgMatch = /<img[^>]+src="([^"]+)"/i.exec(block);
-      if (!linkMatch || !titleMatch) continue;
-      out.push({
-        url: linkMatch[1],
-        title: stripTags(titleMatch[1]),
-        image: imgMatch ? imgMatch[1] : ''
-      });
+    while ((m = re.exec(html)) !== null) positions.push(m.index);
+    var blocks = [];
+    for (var i = 0; i < positions.length; i++) {
+      var end = i + 1 < positions.length ? positions[i + 1] : positions[i] + 4000;
+      blocks.push(html.substring(positions[i], end));
     }
-    return out;
+    return blocks;
   }
 
-  function buildDeal(post) {
-    var detail;
-    try { detail = fetchHtml(post.url); }
-    catch (e) { return null; }
+  function parseCard(block) {
+    var titleM = /<a[^>]*class="[^"]*\bitem-title\b[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
+    if (!titleM) return null;
+    var detailUrl = titleM[1];
+    var title = stripTags(titleM[2]);
 
-    // Outbound link: anchors pointing to amazon / amzn / the site's /go/ redirector.
-    var outbound = findOutboundLink(detail);
-    var amazonLink = outbound ? resolveAmazonLink(outbound) : null;
+    var imgM = /<a[^>]*class="[^"]*\bproduct-img\b[^"]*"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"/i.exec(block);
+    var image = imgM ? imgM[1] : '';
 
-    var prices = findPrices(detail);
-    var image = post.image || findOgImage(detail);
+    var newM = /<div[^>]*class="[^"]*\bnew-price\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i.exec(block);
+    var oldM = /<div[^>]*class="[^"]*\bold-price\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i.exec(block);
+    var current = newM ? parsePrice(stripTags(newM[1])) : null;
+    var original = oldM ? parsePrice(stripTags(oldM[1])) : null;
 
-    var keyForId = amazonLink || outbound || post.url || post.title;
+    var shopM = /<a[^>]*class="[^"]*\bbtn-shopnow\b[^"]*"[^>]+href="([^"]+)"/i.exec(block);
+    var outbound = shopM ? shopM[1] : detailUrl;
+    var amazonLink = resolveAmazonLink(outbound);
+
     return {
       source: NAME,
-      title: post.title,
-      currentPrice: prices.current,
-      originalPrice: prices.original,
+      title: title,
+      currentPrice: current,
+      originalPrice: original,
       imageUrl: image,
-      sourceLink: post.url,
+      sourceLink: detailUrl,
       amazonLink: amazonLink,
-      id: sha1Short(keyForId)
+      id: sha1Short(amazonLink || outbound || detailUrl || title)
     };
-  }
-
-  function findOutboundLink(html) {
-    var patterns = [
-      /href="(https?:\/\/[^"]*amazon\.[a-z.]+\/[^"]+)"/i,
-      /href="(https?:\/\/amzn\.(?:to|in)\/[^"]+)"/i,
-      /href="(https?:\/\/(?:www\.)?indiafreestuff\.in\/go\/[^"]+)"/i,
-      /href="(https?:\/\/(?:www\.)?indiafreestuff\.in\/out\/[^"]+)"/i,
-      /href="(https?:\/\/(?:www\.)?flipkart\.com\/[^"]+)"/i
-    ];
-    for (var i = 0; i < patterns.length; i++) {
-      var m = patterns[i].exec(html);
-      if (m) return m[1];
-    }
-    return null;
-  }
-
-  function findPrices(html) {
-    // Heuristics: look for ₹/Rs patterns. First number = current; if a higher
-    // number appears nearby labelled "MRP" / strikethrough, treat as original.
-    var current = null, original = null;
-    var mrp = /(?:MRP|M\.R\.P|Original Price|Regular Price)[^0-9₹]{0,20}(?:₹|Rs\.?|INR)?\s*([\d,]+(?:\.\d+)?)/i.exec(html);
-    if (mrp) original = parsePrice(mrp[1]);
-    var deal = /(?:Deal Price|Offer Price|Now|Price)[^0-9₹]{0,20}(?:₹|Rs\.?|INR)?\s*([\d,]+(?:\.\d+)?)/i.exec(html);
-    if (deal) current = parsePrice(deal[1]);
-    if (current == null) {
-      var firstRupee = /(?:₹|Rs\.?\s*|INR\s*)([\d,]+(?:\.\d+)?)/i.exec(html);
-      if (firstRupee) current = parsePrice(firstRupee[1]);
-    }
-    return { current: current, original: original };
-  }
-
-  function findOgImage(html) {
-    var m = /<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i.exec(html);
-    return m ? m[1] : '';
   }
 
   return { name: NAME, fetch: fetch };
 })();
 
 function _testIndiaFreeStuff() {
-  var ds = IndiaFreeStuff.fetch().slice(0, 3);
-  console.log(JSON.stringify(ds, null, 2));
+  console.log(JSON.stringify(IndiaFreeStuff.fetch().slice(0, 3), null, 2));
 }
