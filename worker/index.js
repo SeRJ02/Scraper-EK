@@ -47,20 +47,33 @@ async function handleResolve(u, withSession) {
   let t;
   try { t = new URL(target); } catch { return json({ error: 'bad url' }, 400); }
 
-  // Optionally prime cookies by visiting the origin's homepage first. This
-  // matters for rto-style links that 302 only when the request carries a
-  // session cookie set by the home page.
+  // Prime cookies by walking through the same navigation a real visitor would:
+  //   1. GET the homepage  (browser-style headers)
+  //   2. GET /pages/getdeals (XHR-style, with cookies from step 1)
+  // Only after this does the server consider the session "warm" enough to
+  // honour the ?rto= redirect for a deal it knows we've seen.
   let cookieHeader = '';
   if (withSession) {
-    const primeUrl = `${t.protocol}//${t.hostname}/`;
+    const origin = `${t.protocol}//${t.hostname}`;
     try {
-      const prime = await fetch(primeUrl, {
-        headers: browserHeadersForNavigation(primeUrl),
+      const home = await fetch(origin + '/', {
+        headers: browserHeadersForNavigation(origin + '/'),
         redirect: 'follow'
       });
-      cookieHeader = collectCookies(prime.headers);
-    } catch (e) {
-      // Continue anyway — without cookies we may still get lucky.
+      cookieHeader = collectCookies(home.headers);
+    } catch (e) {}
+    // Step 2: hit the deals AJAX endpoint (only meaningful for indiafreestuff,
+    // harmless for others — 404s don't break the resolve flow).
+    if (t.hostname.endsWith('indiafreestuff.in')) {
+      try {
+        const xhrHeaders = browserHeaders(origin + '/pages/getdeals');
+        if (cookieHeader) xhrHeaders['Cookie'] = cookieHeader;
+        const deals = await fetch(origin + '/pages/getdeals', {
+          headers: xhrHeaders, redirect: 'follow'
+        });
+        const more = collectCookies(deals.headers);
+        if (more) cookieHeader = mergeCookies(cookieHeader, more);
+      } catch (e) {}
     }
   }
 
