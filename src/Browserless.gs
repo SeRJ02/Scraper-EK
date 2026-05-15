@@ -99,14 +99,14 @@ function browserlessResolveUrl(targetUrl) {
 }
 
 function _testBrowserless() {
-  var rto = 'https://www.indiafreestuff.in/?rto=Mjg2ODk2NTI5Nw==';
+  var rto = 'https://www.indiafreestuff.in/?rto=MjM3ODE1NDM4Mw==';
   console.log('Input : ' + rto);
   console.log('Output: ' + browserlessResolveUrl(rto));
 }
 
 // Cache-bypassing diagnostic with explicit step-by-step logging.
 function _testBrowserlessFresh() {
-  var rto = 'https://www.indiafreestuff.in/?rto=Mjg2ODk2NTI5Nw==';
+  var rto = 'https://www.indiafreestuff.in/?rto=MjM3ODE1NDM4Mw==';
   var cache = CacheService.getScriptCache();
   var key = 'br_' + sha1Short(rto);
   console.log('Cache key   : ' + key);
