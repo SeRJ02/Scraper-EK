@@ -39,13 +39,38 @@ async function handleResolve(u) {
   const target = u.searchParams.get('url');
   if (!target) return json({ error: 'missing url' }, 400);
 
-  let r;
-  try {
-    r = await fetch(target, { headers: browserHeaders(target), redirect: 'follow' });
-  } catch (e) {
-    return json({ error: 'upstream: ' + e.message }, 502);
+  // Chase HTTP redirects (handled by fetch) and HTML/JS bounces (handled here)
+  // up to a small bound. Source sites sometimes return 200 with a meta-refresh
+  // or window.location bounce instead of a 30x.
+  let current = target;
+  for (let i = 0; i < 6; i++) {
+    let r;
+    try {
+      r = await fetch(current, { headers: browserHeaders(current), redirect: 'follow' });
+    } catch (e) {
+      return json({ error: 'upstream: ' + e.message, url: current }, 502);
+    }
+    if (r.url && r.url !== current) current = r.url;
+    if (r.status !== 200) break;
+
+    const ct = (r.headers.get('content-type') || '').toLowerCase();
+    if (!ct.includes('text/html')) break;
+
+    const body = await r.text();
+    const bounced = extractBounceFromHtml(body);
+    if (!bounced) break;
+    try { current = new URL(bounced, current).toString(); }
+    catch { break; }
   }
-  return json({ url: r.url, status: r.status });
+  return json({ url: current, status: 200 });
+}
+
+function extractBounceFromHtml(html) {
+  const meta = /<meta[^>]+http-equiv=["']?refresh["']?[^>]+content=["'][^"']*url=([^"'\s>]+)/i.exec(html);
+  if (meta) return meta[1];
+  const js = /(?:window\.location(?:\.href)?|location\.href|location\.replace\s*\(?)\s*=?\s*["']([^"']+)["']/i.exec(html);
+  if (js) return js[1];
+  return null;
 }
 
 async function handleFetch(u, env) {

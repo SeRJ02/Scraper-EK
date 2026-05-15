@@ -22,46 +22,40 @@ function resolveBuyLink(url) {
   if (!url) return null;
   var current = url;
   // Source sites (indiafreestuff, bigtricks) block Apps Script's IP. If the
-  // starting URL is on one of those hosts, use the Worker to chase redirects
-  // from Cloudflare's edge; once we have the final URL, classify it below.
+  // starting URL is on one of those hosts, ask the Worker to chase the chain
+  // (HTTP + HTML/JS bounces) from Cloudflare's edge and return the final URL.
   var startHostM = /^https?:\/\/([^\/]+)/i.exec(current);
   if (startHostM && SOURCE_HOST_RE.test(startHostM[1])) {
     var viaProxy = proxyResolveUrl(current);
     if (viaProxy) current = viaProxy;
-  }
-  for (var i = 0; i < 8; i++) {
-    var resp;
-    try {
-      resp = UrlFetchApp.fetch(current, {
-        method: 'get',
-        followRedirects: false,
-        muteHttpExceptions: true,
-        headers: { 'User-Agent': CONFIG.USER_AGENT }
-      });
-    } catch (e) {
-      break;
-    }
-    var code = resp.getResponseCode();
-    if (code >= 300 && code < 400) {
-      var loc = resp.getAllHeaders()['Location'] || resp.getAllHeaders()['location'];
-      if (!loc) break;
-      current = absolutize(current, loc);
-      continue;
-    }
-    if (code === 200) {
-      // Some redirectors (?rto=...) return 200 with an HTML page that
-      // bounces via <meta http-equiv="refresh"> or window.location=.
-      // UrlFetchApp can't execute JS, but we can parse for these patterns.
-      var body = '';
-      try { body = resp.getContentText(); } catch (e) { body = ''; }
-      var bouncedTo = extractBounce(body);
-      if (bouncedTo && bouncedTo !== current) {
-        current = absolutize(current, bouncedTo);
+  } else {
+    // Non-source host (amzn.to, fkrt.it, direct amazon/flipkart/etc.): chase
+    // plain HTTP redirects directly. NO HTML-body bounce parsing here —
+    // retailer product pages reference their own asset URLs that would
+    // false-match a generic "find retailer link" regex.
+    for (var i = 0; i < 8; i++) {
+      var resp;
+      try {
+        resp = UrlFetchApp.fetch(current, {
+          method: 'get',
+          followRedirects: false,
+          muteHttpExceptions: true,
+          headers: { 'User-Agent': CONFIG.USER_AGENT }
+        });
+      } catch (e) {
+        break;
+      }
+      var code = resp.getResponseCode();
+      if (code >= 300 && code < 400) {
+        var loc = resp.getAllHeaders()['Location'] || resp.getAllHeaders()['location'];
+        if (!loc) break;
+        current = absolutize(current, loc);
         continue;
       }
+      break;
     }
-    break;
   }
+
   var hostM = /^https?:\/\/([^\/]+)/i.exec(current);
   if (!hostM) return null;
   var host = hostM[1];
@@ -71,19 +65,6 @@ function resolveBuyLink(url) {
   if (FLIPKART_HOST_RE.test(host)) return { url: cleanFlipkart(current), merchant: 'flipkart' };
   // Other retailers (Myntra, Ajio, Snapdeal, ...) — keep the URL.
   return { url: current.split('?')[0], merchant: host.replace(/^www\./, '') };
-}
-
-// Look for a non-HTTP-redirect bounce inside an HTML body. Returns the
-// destination URL or null.
-function extractBounce(html) {
-  var meta = /<meta[^>]+http-equiv=["']?refresh["']?[^>]+content=["'][^"']*url=([^"'\s>]+)/i.exec(html);
-  if (meta) return meta[1];
-  var js = /(?:window\.location(?:\.href)?|location\.href|location\.replace\s*\(?)\s*=?\s*["']([^"']+)["']/i.exec(html);
-  if (js) return js[1];
-  // Anchor href fallback (some "press to continue" interstitials).
-  var canonicalRetailer = /href="(https?:\/\/(?:[^"]*amazon\.[a-z.]+|amzn\.(?:to|in)|(?:www\.)?flipkart\.com|fkrt\.(?:it|cc)|(?:www\.)?myntra\.com|(?:www\.)?ajio\.com|(?:www\.)?snapdeal\.com)\/[^"]+)"/i.exec(html);
-  if (canonicalRetailer) return canonicalRetailer[1];
-  return null;
 }
 
 function resolveAmazonLink(url) {
