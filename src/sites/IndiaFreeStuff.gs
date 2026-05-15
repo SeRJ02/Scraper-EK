@@ -88,12 +88,13 @@ var IndiaFreeStuff = (function () {
       var hrefM = /\bhref="([^"]+)"/i.exec(shopAnchorM[0]);
       if (hrefM) rtoUrl = hrefM[1];
     }
-    // Resolve rto → retailer URL via the Worker's session-priming endpoint.
-    // The bare rto link only works in the visitor's browser session; replaying
-    // homepage cookies from Cloudflare's edge is what makes it follow through.
+    // Resolve rto → retailer URL via a real headless browser (browserless.io).
+    // The rto endpoint is session-bound and JS-driven, so HTTP-only fetchers
+    // (Apps Script, plain Cloudflare Worker) can't follow it. browserless
+    // opens it in a real Chromium and reports the URL the page lands on.
     var buyLink = null;
     if (rtoUrl) {
-      var resolved = proxyResolveSessionUrl(rtoUrl);
+      var resolved = browserlessResolveUrl(rtoUrl);
       // Only accept resolved URLs that exit indiafreestuff to a retailer.
       if (resolved && !/^https?:\/\/(?:www\.)?indiafreestuff\.in/i.test(resolved)) {
         buyLink = resolved;

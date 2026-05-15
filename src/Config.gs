@@ -13,5 +13,6 @@ var CONFIG = {
   PROP_SHEET_ID: 'SHEET_ID',
   PROP_WORKER_URL: 'PROXY_WORKER_URL',         // e.g. https://my-proxy.workers.dev
   PROP_WORKER_TOKEN: 'PROXY_WORKER_TOKEN',     // shared secret matching the Worker
-  PROP_AFFILIATE_TOKEN: 'AFFILIATE_API_TOKEN'  // Ekaro / Affiliators bearer token
+  PROP_AFFILIATE_TOKEN: 'AFFILIATE_API_TOKEN', // Ekaro / Affiliators bearer token
+  PROP_BROWSERLESS_TOKEN: 'BROWSERLESS_API_TOKEN' // browserless.io API token
 };
