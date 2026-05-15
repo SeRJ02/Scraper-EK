@@ -28,7 +28,10 @@
 var IndiaFreeStuff = (function () {
   var NAME = 'indiafreestuff';
   var ENDPOINT = 'https://www.indiafreestuff.in/pages/getdeals';
-  var MAX_CARDS = 25;
+  // Each card requires a Browserless residential-proxy session (~20s + quota
+  // cost), so cap per-cycle work. The 15-min trigger naturally fills the
+  // sheet across cycles as new deals appear on the listing.
+  var MAX_CARDS = 8;
 
   function fetch() {
     // The site 403s Apps Script's IP range; go via the Cloudflare Worker proxy.

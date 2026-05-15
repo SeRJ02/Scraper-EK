@@ -27,21 +27,14 @@ function browserlessResolveUrl(targetUrl) {
   var hit = cache.get(key);
   if (hit) return hit === '__NULL__' ? null : hit;
 
-  // Walk the same path a real visitor does: prime the origin so the deal
-  // listing AJAX state is established, visit the target rto URL, wait for the
-  // JS-driven redirect to fire, then read the current URL.
-  var origin = (/^(https?:\/\/[^\/]+)/i.exec(targetUrl) || [, ''])[1] + '/';
-  // Cloudflare WAF blocks Browserless's datacenter IPs outright on
-  // indiafreestuff.in, so we route through residential proxy (Browserless
-  // paid feature) for both prime + visit. If the user's plan doesn't include
-  // residential, the API will error and we cache the failure briefly.
+  // Residential proxy (set on the endpoint URL below) bypasses Cloudflare's
+  // datacenter-IP block, so we can hit the rto URL directly — no homepage
+  // prime needed. Saves a goto + ~5s per resolve.
   var query =
     'mutation Resolve {\n' +
-    '  prime: goto(url: ' + JSON.stringify(origin) + ', waitUntil: domContentLoaded) { status }\n' +
     '  visit: goto(url: ' + JSON.stringify(targetUrl) + ', waitUntil: domContentLoaded) { status }\n' +
-    '  pause: waitForTimeout(time: 4000) { time }\n' +
+    '  pause: waitForTimeout(time: 3500) { time }\n' +
     '  current: url { url }\n' +
-    '  pageTitle: title { title }\n' +
     '}';
 
   // Route the whole session through Browserless's residential-IP proxy so
@@ -85,9 +78,6 @@ function browserlessResolveUrl(targetUrl) {
   var d = data && data.data;
   var finalUrl = (d && d.current && d.current.url) ||
                  (d && d.visit && d.visit.url) || null;
-  // Diagnostic: log the page title so we can tell what actually rendered
-  // (search page vs product page vs error page) when resolution fails.
-  if (d && d.pageTitle && d.pageTitle.title) console.log('BrowserQL page title: ' + d.pageTitle.title);
   if (!finalUrl || !/^https?:\/\//i.test(finalUrl)) {
     console.warn('BrowserQL no url for ' + targetUrl + ': ' +
       JSON.stringify(data).substring(0, 300));
