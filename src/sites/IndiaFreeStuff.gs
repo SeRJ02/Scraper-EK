@@ -61,10 +61,14 @@ var IndiaFreeStuff = (function () {
   }
 
   function parseCard(block) {
-    var titleM = /<a[^>]*class="[^"]*\bitem-title\b[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
-    if (!titleM) return null;
-    var detailUrl = titleM[1];
-    var title = stripTags(titleM[2]);
+    // Find the <a class="...item-title..."> anchor and extract href + inner text
+    // regardless of attribute order.
+    var titleAnchorM = /<a\b[^>]*\bclass="[^"]*\bitem-title\b[^"]*"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
+    if (!titleAnchorM) return null;
+    var titleHrefM = /\bhref="([^"]+)"/i.exec(titleAnchorM[0]);
+    if (!titleHrefM) return null;
+    var detailUrl = titleHrefM[1];
+    var title = stripTags(titleAnchorM[1]);
 
     // Image may live inside <div class="product-img"> or an anchor with that class.
     var imgM =
@@ -81,8 +85,14 @@ var IndiaFreeStuff = (function () {
     // (with the session cookies indiafreestuff sets) redirects to the retailer.
     // Resolving from Apps Script / Cloudflare bounces to a search page because
     // the rto token is session-bound.
-    var shopM = /<a[^>]*class="[^"]*\bbtn-shopnow\b[^"]*"[^>]+href="([^"]+)"/i.exec(block);
-    var buyLink = shopM ? shopM[1] : null;
+    // Match attribute order-agnostically: find the anchor tag whose class
+    // contains btn-shopnow, then pull href from inside it.
+    var shopAnchorM = /<a\b[^>]*\bclass="[^"]*\bbtn-shopnow\b[^"]*"[^>]*>/i.exec(block);
+    var buyLink = null;
+    if (shopAnchorM) {
+      var hrefM = /\bhref="([^"]+)"/i.exec(shopAnchorM[0]);
+      if (hrefM) buyLink = hrefM[1];
+    }
 
     // The card also contains a small brand logo anchor pointing at
     //   https://www.indiafreestuff.in/stores/<merchant>
