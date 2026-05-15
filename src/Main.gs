@@ -25,22 +25,27 @@ function runScrape() {
       for (var d = 0; d < deals.length; d++) {
         var deal = deals[d];
         if (!deal || !deal.id) continue;
-        if (!seenSet[deal.id]) {
-          seenSet[deal.id] = true;
-          state.seenIds.push(deal.id);
-          newDeals.push(deal);
+        if (seenSet[deal.id]) continue;
+        // Mark seen even if we end up dropping the deal, so we don't burn
+        // affiliate-API quota retrying the same un-convertible link every cycle.
+        seenSet[deal.id] = true;
+        state.seenIds.push(deal.id);
+
+        if (!deal.buyLink) {
+          console.log('Drop (no buyLink): ' + (deal.title || deal.id));
+          continue;
         }
+        var affLink = convertAffiliateLink(deal.buyLink);
+        if (!affLink) {
+          console.log('Drop (affiliate convert failed): ' + (deal.title || deal.id));
+          continue;
+        }
+        deal.buyLink = affLink;
+        newDeals.push(deal);
       }
     }
 
     if (newDeals.length) {
-      // Convert each new deal's buyLink to its affiliate URL. Conversion is
-      // cached, so re-runs with the same URLs hit memory not the API. If the
-      // affiliate token isn't configured, this is a no-op.
-      for (var n = 0; n < newDeals.length; n++) {
-        var nd = newDeals[n];
-        if (nd && nd.buyLink) nd.buyLink = convertAffiliateLink(nd.buyLink);
-      }
       // Most recently discovered new deal lands at row 1.
       newDeals.reverse();
       state.topDeals = newDeals.concat(state.topDeals).slice(0, CONFIG.MAX_ROWS);
