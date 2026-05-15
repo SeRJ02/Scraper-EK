@@ -33,9 +33,9 @@ function browserlessResolveUrl(targetUrl) {
   var origin = (/^(https?:\/\/[^\/]+)/i.exec(targetUrl) || [, ''])[1] + '/';
   var query =
     'mutation Resolve {\n' +
-    '  prime: goto(url: ' + JSON.stringify(origin) + ', waitUntil: networkIdle) { status }\n' +
-    '  visit: goto(url: ' + JSON.stringify(targetUrl) + ', waitUntil: load) { status }\n' +
-    '  pause: waitForTimeout(time: 6000) { time }\n' +
+    '  prime: goto(url: ' + JSON.stringify(origin) + ', waitUntil: domContentLoaded) { status }\n' +
+    '  visit: goto(url: ' + JSON.stringify(targetUrl) + ', waitUntil: domContentLoaded) { status }\n' +
+    '  pause: waitForTimeout(time: 4000) { time }\n' +
     '  current: url { url }\n' +
     '  pageTitle: title { title }\n' +
     '}';
