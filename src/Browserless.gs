@@ -101,10 +101,20 @@ function _testBrowserless() {
   console.log('Output: ' + browserlessResolveUrl(rto));
 }
 
-// Cache-bypassing variant — wipes the cache entry first, then re-resolves.
+// Cache-bypassing diagnostic with explicit step-by-step logging.
 function _testBrowserlessFresh() {
   var rto = 'https://www.indiafreestuff.in/?rto=Mjg2ODk2NTI5Nw==';
-  CacheService.getScriptCache().remove('br_' + sha1Short(rto));
-  console.log('Input : ' + rto);
-  console.log('Output: ' + browserlessResolveUrl(rto));
+  var cache = CacheService.getScriptCache();
+  var key = 'br_' + sha1Short(rto);
+  console.log('Cache key   : ' + key);
+  console.log('Before clear: ' + (cache.get(key) || '(empty)'));
+  cache.remove(key);
+  console.log('After clear : ' + (cache.get(key) || '(empty)'));
+  console.log('Token set?  : ' + !!PropertiesService.getScriptProperties().getProperty(CONFIG.PROP_BROWSERLESS_TOKEN));
+  console.log('Input       : ' + rto);
+  var t0 = new Date().getTime();
+  var out = browserlessResolveUrl(rto);
+  var ms = new Date().getTime() - t0;
+  console.log('Output      : ' + out);
+  console.log('Took        : ' + ms + 'ms');
 }
