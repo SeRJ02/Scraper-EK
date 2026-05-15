@@ -32,11 +32,23 @@ function browserlessResolveUrl(targetUrl) {
 
   // Inline the URL safely: JSON.stringify wraps + escapes it as a JS literal.
   var safeUrl = JSON.stringify(targetUrl);
+  // Walk the same path a real visitor takes:
+  //   1. Open the origin homepage so the deal-listing AJAX fires and any
+  //      session cookies / JS state get established
+  //   2. Then navigate to the rto URL — server sees a "warm" session and
+  //      issues the 302 to the retailer
+  //   3. Wait briefly for any meta-refresh / window.location follow-up
+  //   4. Return whatever URL the page is now on
+  var originHost = (/^(https?:\/\/[^\/]+)/i.exec(targetUrl) || [, ''])[1];
+  var safeOrigin = JSON.stringify(originHost + '/');
   var code =
     'export default async function ({ page }) {\n' +
+    '  await page.goto(' + safeOrigin + ', { waitUntil: "networkidle2", timeout: 30000 });\n' +
+    '  // Give the homepage AJAX (e.g. /pages/getdeals) time to settle.\n' +
+    '  await new Promise(function (r) { setTimeout(r, 2000); });\n' +
     '  await page.goto(' + safeUrl + ', { waitUntil: "domcontentloaded", timeout: 25000 });\n' +
-    '  // Give JS-driven redirects a moment to fire.\n' +
-    '  await new Promise(function (r) { setTimeout(r, 2500); });\n' +
+    '  // Wait for any JS-driven follow-up redirect.\n' +
+    '  await new Promise(function (r) { setTimeout(r, 3500); });\n' +
     '  return { data: page.url(), type: "application/json" };\n' +
     '}\n';
 
