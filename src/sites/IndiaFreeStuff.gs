@@ -28,10 +28,11 @@
 var IndiaFreeStuff = (function () {
   var NAME = 'indiafreestuff';
   var ENDPOINT = 'https://www.indiafreestuff.in/pages/getdeals';
-  // Each card requires a Browserless residential-proxy session (~20s + quota
-  // cost), so cap per-cycle work. The 15-min trigger naturally fills the
-  // sheet across cycles as new deals appear on the listing.
-  var MAX_CARDS = 8;
+  // Amazon cards skip Browserless (rto URL fed straight to Ekaro), so they're
+  // cheap; only non-Amazon cards pay the ~20s Browserless cost. Cap at a
+  // size that keeps the worst-case mix inside Apps Script's 6-minute budget
+  // even if most cards turn out to be Flipkart.
+  var MAX_CARDS = 20;
 
   function fetch() {
     // The site 403s Apps Script's IP range; go via the Cloudflare Worker proxy.
@@ -91,25 +92,36 @@ var IndiaFreeStuff = (function () {
       var hrefM = /\bhref="([^"]+)"/i.exec(shopAnchorM[0]);
       if (hrefM) rtoUrl = hrefM[1];
     }
-    // Resolve rto → retailer URL via a real headless browser (browserless.io).
-    // The rto endpoint is session-bound and JS-driven, so HTTP-only fetchers
-    // (Apps Script, plain Cloudflare Worker) can't follow it. browserless
-    // opens it in a real Chromium and reports the URL the page lands on.
-    var buyLink = null;
-    if (rtoUrl) {
-      var resolved = browserlessResolveUrl(rtoUrl);
-      // Only accept resolved URLs that exit indiafreestuff to a retailer.
-      if (resolved && !/^https?:\/\/(?:www\.)?indiafreestuff\.in/i.test(resolved)) {
-        buyLink = resolved;
-      }
-    }
 
     // The card also contains a small brand logo anchor pointing at
     //   https://www.indiafreestuff.in/stores/<merchant>
-    // Use that to tag the merchant column.
+    // Use that to tag the merchant column AND decide how to resolve the link.
     var merchant = null;
     var brandM = /<a[^>]+href="https?:\/\/(?:www\.)?indiafreestuff\.in\/stores\/([a-z0-9_-]+)"/i.exec(block);
     if (brandM) merchant = brandM[1].toLowerCase();
+
+    // Buy-link strategy depends on the merchant:
+    //   amazon → Ekaro recognises and converts the bare rto URL itself, so
+    //            we hand it the rto without resolving. Fast and free.
+    //   anything else (flipkart, myntra, etc.) → we need the actual retailer
+    //            URL. Resolve via Browserless (residential proxy + JS),
+    //            unwrapping any linkredirect.in middleman. If Browserless
+    //            is unavailable (no token, quota exhausted, network error),
+    //            we silently drop just this card — BigTricks and Amazon-IFS
+    //            cards in the same cycle are unaffected.
+    var buyLink = null;
+    if (rtoUrl) {
+      if (merchant === 'amazon') {
+        buyLink = rtoUrl;
+      } else {
+        var resolved;
+        try { resolved = browserlessResolveUrl(rtoUrl); }
+        catch (e) { console.warn(NAME + ' browserless threw: ' + e); resolved = null; }
+        if (resolved && !/^https?:\/\/(?:www\.)?indiafreestuff\.in/i.test(resolved)) {
+          buyLink = resolved;
+        }
+      }
+    }
 
     return {
       source: NAME,
