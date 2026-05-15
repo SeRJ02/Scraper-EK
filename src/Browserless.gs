@@ -103,6 +103,20 @@ function browserlessResolveUrl(targetUrl) {
     return null;
   }
 
+  // linkredirect.in is an affiliate middleman between deal sites and retailers
+  // and embeds the actual destination in a ?dl= query param. Skip the extra
+  // navigation hop by extracting it directly.
+  var dlMatch = /[?&]dl=([^&#]+)/i.exec(finalUrl);
+  if (dlMatch && /(^|\.)linkredirect\.in$/i.test((/^https?:\/\/([^\/]+)/i.exec(finalUrl) || [, ''])[1])) {
+    try {
+      var decoded = decodeURIComponent(dlMatch[1]);
+      if (/^https?:\/\//i.test(decoded)) {
+        console.log('linkredirect.in → ' + decoded);
+        finalUrl = decoded;
+      }
+    } catch (e) {}
+  }
+
   cache.put(key, finalUrl, BROWSERLESS_CACHE_TTL_SECONDS);
   return finalUrl;
 }
