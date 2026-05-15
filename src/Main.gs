@@ -34,6 +34,13 @@ function runScrape() {
     }
 
     if (newDeals.length) {
+      // Convert each new deal's buyLink to its affiliate URL. Conversion is
+      // cached, so re-runs with the same URLs hit memory not the API. If the
+      // affiliate token isn't configured, this is a no-op.
+      for (var n = 0; n < newDeals.length; n++) {
+        var nd = newDeals[n];
+        if (nd && nd.buyLink) nd.buyLink = convertAffiliateLink(nd.buyLink);
+      }
       // Most recently discovered new deal lands at row 1.
       newDeals.reverse();
       state.topDeals = newDeals.concat(state.topDeals).slice(0, CONFIG.MAX_ROWS);

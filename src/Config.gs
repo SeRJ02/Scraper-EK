@@ -11,6 +11,7 @@ var CONFIG = {
   STATE_KEY_SEEN: 'seenIds',
   STATE_KEY_TOP: 'topDeals',
   PROP_SHEET_ID: 'SHEET_ID',
-  PROP_WORKER_URL: 'PROXY_WORKER_URL',     // e.g. https://my-proxy.workers.dev
-  PROP_WORKER_TOKEN: 'PROXY_WORKER_TOKEN'  // shared secret matching the Worker
+  PROP_WORKER_URL: 'PROXY_WORKER_URL',         // e.g. https://my-proxy.workers.dev
+  PROP_WORKER_TOKEN: 'PROXY_WORKER_TOKEN',     // shared secret matching the Worker
+  PROP_AFFILIATE_TOKEN: 'AFFILIATE_API_TOKEN'  // Ekaro / Affiliators bearer token
 };
