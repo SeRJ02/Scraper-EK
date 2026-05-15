@@ -31,10 +31,14 @@ function browserlessResolveUrl(targetUrl) {
   // listing AJAX state is established, visit the target rto URL, wait for the
   // JS-driven redirect to fire, then read the current URL.
   var origin = (/^(https?:\/\/[^\/]+)/i.exec(targetUrl) || [, ''])[1] + '/';
+  // Cloudflare WAF blocks Browserless's datacenter IPs outright on
+  // indiafreestuff.in, so we route through residential proxy (Browserless
+  // paid feature) for both prime + visit. If the user's plan doesn't include
+  // residential, the API will error and we cache the failure briefly.
   var query =
     'mutation Resolve {\n' +
-    '  prime: goto(url: ' + JSON.stringify(origin) + ', waitUntil: domContentLoaded) { status }\n' +
-    '  visit: goto(url: ' + JSON.stringify(targetUrl) + ', waitUntil: domContentLoaded) { status }\n' +
+    '  prime: goto(url: ' + JSON.stringify(origin) + ', waitUntil: domContentLoaded, proxy: residential) { status }\n' +
+    '  visit: goto(url: ' + JSON.stringify(targetUrl) + ', waitUntil: domContentLoaded, proxy: residential) { status }\n' +
     '  pause: waitForTimeout(time: 4000) { time }\n' +
     '  current: url { url }\n' +
     '  pageTitle: title { title }\n' +
