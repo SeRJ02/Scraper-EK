@@ -33,11 +33,11 @@ function browserlessResolveUrl(targetUrl) {
   var origin = (/^(https?:\/\/[^\/]+)/i.exec(targetUrl) || [, ''])[1] + '/';
   var query =
     'mutation Resolve {\n' +
-    '  prime: goto(url: ' + JSON.stringify(origin) + ', waitUntil: networkIdle, humanLike: true) { status }\n' +
-    '  visit: goto(url: ' + JSON.stringify(targetUrl) + ', waitUntil: load, humanLike: true) { status }\n' +
+    '  prime: goto(url: ' + JSON.stringify(origin) + ', waitUntil: networkIdle) { status }\n' +
+    '  visit: goto(url: ' + JSON.stringify(targetUrl) + ', waitUntil: load) { status }\n' +
     '  pause: waitForTimeout(time: 6000) { time }\n' +
     '  current: url { url }\n' +
-    '  pageTitle: title\n' +
+    '  pageTitle: title { title }\n' +
     '}';
 
   var endpoint = BROWSERQL_ENDPOINT + '?token=' + encodeURIComponent(token);
@@ -78,7 +78,7 @@ function browserlessResolveUrl(targetUrl) {
                  (d && d.visit && d.visit.url) || null;
   // Diagnostic: log the page title so we can tell what actually rendered
   // (search page vs product page vs error page) when resolution fails.
-  if (d && d.pageTitle) console.log('BrowserQL page title: ' + JSON.stringify(d.pageTitle));
+  if (d && d.pageTitle && d.pageTitle.title) console.log('BrowserQL page title: ' + d.pageTitle.title);
   if (!finalUrl || !/^https?:\/\//i.test(finalUrl)) {
     console.warn('BrowserQL no url for ' + targetUrl + ': ' +
       JSON.stringify(data).substring(0, 300));
