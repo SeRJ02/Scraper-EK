@@ -3,19 +3,23 @@
 // from Google Cloud IP ranges where Apps Script runs; this Worker forwards
 // from Cloudflare's edge instead.
 //
-// Two endpoints, both gated by ?token=PROXY_TOKEN:
+// Three endpoints, all gated by ?token=PROXY_TOKEN:
 //
-//   GET /?url=<encoded>           — forward the HTML body
-//                                   Allowed hosts come from ALLOWED_HOSTS.
-//                                   Returns the upstream body, plus
-//                                   X-Final-URL and X-Upstream-Status headers.
+//   GET /?url=<encoded>                  — forward the HTML body
+//                                          Allowed hosts come from ALLOWED_HOSTS.
+//                                          Returns the upstream body, plus
+//                                          X-Final-URL and X-Upstream-Status headers.
 //
-//   GET /resolve?url=<encoded>    — follow redirects on the URL and return
-//                                   { url, status } as JSON.
-//                                   No host allowlist on this endpoint (we
-//                                   want to chase redirects that exit the
-//                                   source site to retailers); the token is
-//                                   the only gate.
+//   GET /resolve?url=<encoded>           — follow redirects + HTML/JS bounces
+//                                          on the URL and return { url, status }.
+//                                          No host allowlist.
+//
+//   GET /resolve-session?url=<encoded>   — same as /resolve, but first hits
+//                                          the URL's origin homepage to capture
+//                                          session cookies, then replays them
+//                                          on the target. Used for rto-style
+//                                          masked links that require a prior
+//                                          session.
 //
 // Required Worker variables (Settings → Variables and Secrets):
 //   PROXY_TOKEN   (Secret) : shared with Apps Script
@@ -30,25 +34,50 @@ export default {
       return new Response('forbidden', { status: 403 });
     }
 
-    if (u.pathname === '/resolve') return handleResolve(u);
+    if (u.pathname === '/resolve')         return handleResolve(u, /*withSession=*/false);
+    if (u.pathname === '/resolve-session') return handleResolve(u, /*withSession=*/true);
     return handleFetch(u, env);
   }
 };
 
-async function handleResolve(u) {
+async function handleResolve(u, withSession) {
   const target = u.searchParams.get('url');
   if (!target) return json({ error: 'missing url' }, 400);
 
-  // Chase HTTP redirects (handled by fetch) and HTML/JS bounces (handled here)
-  // up to a small bound. Source sites sometimes return 200 with a meta-refresh
-  // or window.location bounce instead of a 30x.
+  let t;
+  try { t = new URL(target); } catch { return json({ error: 'bad url' }, 400); }
+
+  // Optionally prime cookies by visiting the origin's homepage first. This
+  // matters for rto-style links that 302 only when the request carries a
+  // session cookie set by the home page.
+  let cookieHeader = '';
+  if (withSession) {
+    const primeUrl = `${t.protocol}//${t.hostname}/`;
+    try {
+      const prime = await fetch(primeUrl, {
+        headers: browserHeadersForNavigation(primeUrl),
+        redirect: 'follow'
+      });
+      cookieHeader = collectCookies(prime.headers);
+    } catch (e) {
+      // Continue anyway — without cookies we may still get lucky.
+    }
+  }
+
   let current = target;
   for (let i = 0; i < 6; i++) {
+    const headers = browserHeaders(current);
+    if (cookieHeader) headers['Cookie'] = cookieHeader;
     let r;
     try {
-      r = await fetch(current, { headers: browserHeaders(current), redirect: 'follow' });
+      r = await fetch(current, { headers, redirect: 'follow' });
     } catch (e) {
       return json({ error: 'upstream: ' + e.message, url: current }, 502);
+    }
+    // Accumulate any new cookies from this hop.
+    if (withSession) {
+      const more = collectCookies(r.headers);
+      if (more) cookieHeader = mergeCookies(cookieHeader, more);
     }
     if (r.url && r.url !== current) current = r.url;
     if (r.status !== 200) break;
@@ -63,6 +92,29 @@ async function handleResolve(u) {
     catch { break; }
   }
   return json({ url: current, status: 200 });
+}
+
+function collectCookies(headers) {
+  // Workers Headers exposes getSetCookie() to retrieve all Set-Cookie values
+  // as an array (handling multiple cookies correctly).
+  let raw = [];
+  if (typeof headers.getSetCookie === 'function') raw = headers.getSetCookie();
+  else {
+    const single = headers.get('set-cookie');
+    if (single) raw = [single];
+  }
+  return raw.map(c => c.split(';')[0].trim()).filter(Boolean).join('; ');
+}
+
+function mergeCookies(existing, fresh) {
+  if (!existing) return fresh;
+  if (!fresh) return existing;
+  const map = {};
+  (existing + '; ' + fresh).split(';').forEach(p => {
+    const [k, ...v] = p.trim().split('=');
+    if (k) map[k] = v.join('=');
+  });
+  return Object.keys(map).map(k => k + '=' + map[k]).join('; ');
 }
 
 function extractBounceFromHtml(html) {
@@ -121,6 +173,29 @@ function browserHeaders(url) {
     'Accept-Language': 'en-IN,en;q=0.9',
     'Referer': referer,
     'X-Requested-With': 'XMLHttpRequest'
+  };
+}
+
+function browserHeadersForNavigation(url) {
+  // Headers a real browser sends for a top-level navigation (not an XHR).
+  // Some sites set their session cookie only on this kind of request.
+  let referer = 'https://www.google.com/';
+  try {
+    const t = new URL(url);
+    referer = `${t.protocol}//${t.hostname}/`;
+  } catch {}
+  return {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+      '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-IN,en;q=0.9',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Referer': referer
   };
 }
 

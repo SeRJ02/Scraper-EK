@@ -45,10 +45,21 @@ function fetchViaProxy(targetUrl) {
 // retailer URLs — Apps Script's IP is blocked, so we can't chase those
 // redirects directly.
 function proxyResolveUrl(targetUrl) {
+  return _proxyResolveImpl('/resolve', targetUrl);
+}
+
+// Same as proxyResolveUrl but also primes the origin's session cookies
+// before the resolve. Use for rto-style links that 302 only with a cookie
+// the homepage previously issued.
+function proxyResolveSessionUrl(targetUrl) {
+  return _proxyResolveImpl('/resolve-session', targetUrl);
+}
+
+function _proxyResolveImpl(path, targetUrl) {
   var props = PropertiesService.getScriptProperties();
   if (!props.getProperty(CONFIG.PROP_WORKER_URL)) return null;
   try {
-    var body = proxyCall('/resolve', targetUrl);
+    var body = proxyCall(path, targetUrl);
     var data = JSON.parse(body);
     return data && data.url ? data.url : null;
   } catch (e) {

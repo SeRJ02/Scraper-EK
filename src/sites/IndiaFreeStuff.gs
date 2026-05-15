@@ -81,17 +81,23 @@ var IndiaFreeStuff = (function () {
     var current = newM ? parsePrice(stripTags(newM[1])) : null;
     var original = oldM ? parsePrice(stripTags(oldM[1])) : null;
 
-    // Store the masked Shop Now URL directly — clicking it in a real browser
-    // (with the session cookies indiafreestuff sets) redirects to the retailer.
-    // Resolving from Apps Script / Cloudflare bounces to a search page because
-    // the rto token is session-bound.
-    // Match attribute order-agnostically: find the anchor tag whose class
-    // contains btn-shopnow, then pull href from inside it.
+    // Find the rto Shop Now URL from the card (attribute-order-agnostic).
     var shopAnchorM = /<a\b[^>]*\bclass="[^"]*\bbtn-shopnow\b[^"]*"[^>]*>/i.exec(block);
-    var buyLink = null;
+    var rtoUrl = null;
     if (shopAnchorM) {
       var hrefM = /\bhref="([^"]+)"/i.exec(shopAnchorM[0]);
-      if (hrefM) buyLink = hrefM[1];
+      if (hrefM) rtoUrl = hrefM[1];
+    }
+    // Resolve rto → retailer URL via the Worker's session-priming endpoint.
+    // The bare rto link only works in the visitor's browser session; replaying
+    // homepage cookies from Cloudflare's edge is what makes it follow through.
+    var buyLink = null;
+    if (rtoUrl) {
+      var resolved = proxyResolveSessionUrl(rtoUrl);
+      // Only accept resolved URLs that exit indiafreestuff to a retailer.
+      if (resolved && !/^https?:\/\/(?:www\.)?indiafreestuff\.in/i.test(resolved)) {
+        buyLink = resolved;
+      }
     }
 
     // The card also contains a small brand logo anchor pointing at
@@ -116,6 +122,15 @@ var IndiaFreeStuff = (function () {
 
   return { name: NAME, fetch: fetch };
 })();
+
+// Quick test of the new session-aware resolver. Replace the rto URL with one
+// from your live sheet (right-click an indiafreestuff Source Link row → open
+// → right-click Shop Now → copy link).
+function _testRtoResolveSession() {
+  var rto = 'https://www.indiafreestuff.in/?rto=Mjg2ODk2NTI5Nw==';
+  console.log('Input : ' + rto);
+  console.log('Output: ' + proxyResolveSessionUrl(rto));
+}
 
 function _testIndiaFreeStuff() {
   console.log(JSON.stringify(IndiaFreeStuff.fetch().slice(0, 3), null, 2));
