@@ -27,13 +27,16 @@ function browserlessResolveUrl(targetUrl) {
   var hit = cache.get(key);
   if (hit) return hit === '__NULL__' ? null : hit;
 
-  // Walk the same path a real visitor does: prime the origin (so the deal
-  // listing AJAX state is established), then visit the target rto URL.
+  // Walk the same path a real visitor does: prime the origin so the deal
+  // listing AJAX state is established, visit the target rto URL, wait for the
+  // JS-driven redirect to fire, then read the current URL.
   var origin = (/^(https?:\/\/[^\/]+)/i.exec(targetUrl) || [, ''])[1] + '/';
   var query =
     'mutation Resolve {\n' +
     '  prime: goto(url: ' + JSON.stringify(origin) + ', waitUntil: networkIdle) { status }\n' +
-    '  visit: goto(url: ' + JSON.stringify(targetUrl) + ', waitUntil: networkIdle) { status url time }\n' +
+    '  visit: goto(url: ' + JSON.stringify(targetUrl) + ', waitUntil: load) { status url }\n' +
+    '  pause: wait(timeout: 5000)\n' +
+    '  current: url\n' +
     '}';
 
   var endpoint = BROWSERQL_ENDPOINT + '?token=' + encodeURIComponent(token);
@@ -67,7 +70,11 @@ function browserlessResolveUrl(targetUrl) {
     return null;
   }
 
-  var finalUrl = data && data.data && data.data.visit && data.data.visit.url;
+  // Prefer the post-wait current URL (catches JS-driven redirects); fall back
+  // to the goto-reported URL.
+  var d = data && data.data;
+  var finalUrl = (d && d.current) ||
+                 (d && d.visit && d.visit.url) || null;
   if (!finalUrl || !/^https?:\/\//i.test(finalUrl)) {
     console.warn('BrowserQL no url for ' + targetUrl + ': ' +
       JSON.stringify(data).substring(0, 300));
