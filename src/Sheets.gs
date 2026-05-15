@@ -45,21 +45,16 @@ function writeTopDeals(deals) {
       rows.push(['', '', '', '', '', '', '', '', '']);
       continue;
     }
-    var merchant = d.merchant || '';
-    var buyLabel = merchant === 'amazon' ? 'Open on Amazon'
-                  : merchant === 'flipkart' ? 'Open on Flipkart'
-                  : merchant ? 'Open on ' + merchant
-                  : 'Open';
-    var buyLink = d.buyLink || d.amazonLink || null;  // tolerate legacy field name
+    var buyLink = d.buyLink || d.amazonLink || '';  // tolerate legacy field name
     rows.push([
       i + 1,
       d.source || '',
-      merchant,
+      d.merchant || '',
       d.title || '',
       d.currentPrice == null ? '' : d.currentPrice,
       d.originalPrice == null ? '' : d.originalPrice,
       d.imageUrl ? '=IMAGE("' + escapeFormula(d.imageUrl) + '")' : '',
-      buyLink ? '=HYPERLINK("' + escapeFormula(buyLink) + '","' + buyLabel + '")' : '',
+      buyLink,
       d.sourceLink || ''
     ]);
   }
