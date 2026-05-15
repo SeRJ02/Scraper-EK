@@ -37,14 +37,19 @@ function browserlessResolveUrl(targetUrl) {
   // residential, the API will error and we cache the failure briefly.
   var query =
     'mutation Resolve {\n' +
-    '  prime: goto(url: ' + JSON.stringify(origin) + ', waitUntil: domContentLoaded, proxy: residential) { status }\n' +
-    '  visit: goto(url: ' + JSON.stringify(targetUrl) + ', waitUntil: domContentLoaded, proxy: residential) { status }\n' +
+    '  prime: goto(url: ' + JSON.stringify(origin) + ', waitUntil: domContentLoaded) { status }\n' +
+    '  visit: goto(url: ' + JSON.stringify(targetUrl) + ', waitUntil: domContentLoaded) { status }\n' +
     '  pause: waitForTimeout(time: 4000) { time }\n' +
     '  current: url { url }\n' +
     '  pageTitle: title { title }\n' +
     '}';
 
-  var endpoint = BROWSERQL_ENDPOINT + '?token=' + encodeURIComponent(token);
+  // Route the whole session through Browserless's residential-IP proxy so
+  // Cloudflare WAF sees a residential IP, not a datacenter one.
+  var endpoint = BROWSERQL_ENDPOINT +
+    '?token=' + encodeURIComponent(token) +
+    '&proxy=residential' +
+    '&proxyCountry=in';
   var resp;
   try {
     resp = UrlFetchApp.fetch(endpoint, {
