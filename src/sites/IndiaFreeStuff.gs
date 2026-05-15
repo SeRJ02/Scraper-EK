@@ -29,22 +29,16 @@ var IndiaFreeStuff = (function () {
   var NAME = 'indiafreestuff';
   var ENDPOINT = 'https://www.indiafreestuff.in/pages/getdeals';
   var MAX_CARDS = 25;
-  var MAX_DETAIL_FETCHES = 10;  // cap detail-page fetches to stay under the 6-min budget
 
   function fetch() {
     // The site 403s Apps Script's IP range; go via the Cloudflare Worker proxy.
     var html = fetchViaProxy(ENDPOINT);
     var cards = splitCards(html).slice(0, MAX_CARDS);
     var deals = [];
-    var detailFetched = 0;
     for (var i = 0; i < cards.length; i++) {
       try {
-        var d = parseCard(cards[i], detailFetched < MAX_DETAIL_FETCHES);
-        if (d) {
-          if (d._fetchedDetail) detailFetched++;
-          delete d._fetchedDetail;
-          deals.push(d);
-        }
+        var d = parseCard(cards[i]);
+        if (d) deals.push(d);
       } catch (e) {
         console.warn(NAME + ' card ' + i + ' failed: ' + e);
       }
@@ -66,7 +60,7 @@ var IndiaFreeStuff = (function () {
     return blocks;
   }
 
-  function parseCard(block, mayFetchDetail) {
+  function parseCard(block) {
     var titleM = /<a[^>]*class="[^"]*\bitem-title\b[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
     if (!titleM) return null;
     var detailUrl = titleM[1];
@@ -83,32 +77,19 @@ var IndiaFreeStuff = (function () {
     var current = newM ? parsePrice(stripTags(newM[1])) : null;
     var original = oldM ? parsePrice(stripTags(oldM[1])) : null;
 
+    // Store the masked Shop Now URL directly — clicking it in a real browser
+    // (with the session cookies indiafreestuff sets) redirects to the retailer.
+    // Resolving from Apps Script / Cloudflare bounces to a search page because
+    // the rto token is session-bound.
     var shopM = /<a[^>]*class="[^"]*\bbtn-shopnow\b[^"]*"[^>]+href="([^"]+)"/i.exec(block);
-    var outbound = shopM ? shopM[1] : null;
-    var buy = null;
-    var fetchedDetail = false;
+    var buyLink = shopM ? shopM[1] : null;
 
-    if (outbound) {
-      buy = resolveBuyLink(outbound);
-    } else if (mayFetchDetail) {
-      // No Shop Now on the card — find the outbound link on the detail page.
-      try {
-        var detail = fetchViaProxy(detailUrl);
-        fetchedDetail = true;
-        var outboundInDetailM =
-          /href="(https?:\/\/(?:www\.)?amazon\.[a-z.]+\/[^"]+)"/i.exec(detail) ||
-          /href="(https?:\/\/amzn\.(?:to|in)\/[^"]+)"/i.exec(detail) ||
-          /href="(https?:\/\/(?:www\.)?flipkart\.com\/[^"]+)"/i.exec(detail) ||
-          /href="(https?:\/\/fkrt\.(?:it|cc)\/[^"]+)"/i.exec(detail) ||
-          /href="(https?:\/\/(?:www\.)?indiafreestuff\.in\/\?rto=[^"]+)"/i.exec(detail);
-        if (outboundInDetailM) {
-          outbound = outboundInDetailM[1];
-          buy = resolveBuyLink(outbound);
-        }
-      } catch (e) {
-        console.warn(NAME + ' detail fetch failed for ' + detailUrl + ': ' + e);
-      }
-    }
+    // The card also contains a small brand logo anchor pointing at
+    //   https://www.indiafreestuff.in/stores/<merchant>
+    // Use that to tag the merchant column.
+    var merchant = null;
+    var brandM = /<a[^>]+href="https?:\/\/(?:www\.)?indiafreestuff\.in\/stores\/([a-z0-9_-]+)"/i.exec(block);
+    if (brandM) merchant = brandM[1].toLowerCase();
 
     return {
       source: NAME,
@@ -117,10 +98,9 @@ var IndiaFreeStuff = (function () {
       originalPrice: original,
       imageUrl: image,
       sourceLink: detailUrl,
-      merchant: buy ? buy.merchant : null,
-      buyLink: buy ? buy.url : null,
-      id: sha1Short(detailUrl + '|' + title),
-      _fetchedDetail: fetchedDetail
+      merchant: merchant,
+      buyLink: buyLink,
+      id: sha1Short(detailUrl + '|' + title)
     };
   }
 
