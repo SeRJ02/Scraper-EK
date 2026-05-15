@@ -34,9 +34,9 @@ function browserlessResolveUrl(targetUrl) {
   var query =
     'mutation Resolve {\n' +
     '  prime: goto(url: ' + JSON.stringify(origin) + ', waitUntil: networkIdle) { status }\n' +
-    '  visit: goto(url: ' + JSON.stringify(targetUrl) + ', waitUntil: load) { status url }\n' +
-    '  pause: wait(timeout: 5000)\n' +
-    '  current: url\n' +
+    '  visit: goto(url: ' + JSON.stringify(targetUrl) + ', waitUntil: load) { status }\n' +
+    '  pause: waitForTimeout(time: 5000) { time }\n' +
+    '  current: url { url }\n' +
     '}';
 
   var endpoint = BROWSERQL_ENDPOINT + '?token=' + encodeURIComponent(token);
@@ -71,9 +71,9 @@ function browserlessResolveUrl(targetUrl) {
   }
 
   // Prefer the post-wait current URL (catches JS-driven redirects); fall back
-  // to the goto-reported URL.
+  // to the goto-reported URL if needed.
   var d = data && data.data;
-  var finalUrl = (d && d.current) ||
+  var finalUrl = (d && d.current && d.current.url) ||
                  (d && d.visit && d.visit.url) || null;
   if (!finalUrl || !/^https?:\/\//i.test(finalUrl)) {
     console.warn('BrowserQL no url for ' + targetUrl + ': ' +
