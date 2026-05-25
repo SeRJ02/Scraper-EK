@@ -1,48 +1,82 @@
-// Resolve a URL by running it through Browserless v2's BrowserQL endpoint —
-// a stealth-enabled headless Chromium that bypasses datacenter/bot detection.
-// Used for indiafreestuff's session-bound rto links that 200-stub for any
-// non-stealth fetcher (Apps Script, Cloudflare Worker, legacy Browserless
-// /function). Confirmed working via the BrowserQL editor.
+// Resolve URLs via Browserless v2's BrowserQL endpoint —
+// a stealth-enabled headless Chromium that bypasses Cloudflare WAF.
+//
+// Two entry points:
+//   browserlessResolveUrl(url)        — single URL (caching, used for one-offs)
+//   browserlessResolveUrls(urlArray)  — BATCH: resolves N URLs in ONE browser session
+//                                       (one BrowserQL call = one credit, not N)
 //
 // Endpoint: POST https://production-sfo.browserless.io/chromium/bql?token=TOKEN
-// Body    : { "query": "mutation { ... }" }
 // Auth    : BROWSERLESS_API_TOKEN script property (your v2 token).
+// Proxy   : residential India — bypasses Cloudflare datacenter-IP block.
 //
-// Caching: 6-hour TTL via CacheService keyed by sha1(url). Failures are also
-// cached briefly to avoid hammering the API on un-resolvable links.
+// Caching: 6-hour TTL via CacheService keyed by sha1(url).
 
 var BROWSERQL_ENDPOINT = 'https://production-sfo.browserless.io/chromium/bql';
 var BROWSERLESS_CACHE_TTL_SECONDS = 21600; // 6h
+var BROWSERLESS_NEG_CACHE_TTL = 600;       // 10 min negative cache
 
-function browserlessResolveUrl(targetUrl) {
-  if (!targetUrl) return null;
+// ---------------------------------------------------------------------------
+// Batch resolver — resolves up to MAX_BATCH_URLS URLs in a single BrowserQL
+// call. Returns a plain object mapping input URL → resolved URL (or null).
+// ---------------------------------------------------------------------------
+var MAX_BATCH_URLS = 15; // keep mutation size reasonable
+
+function browserlessResolveUrls(urls) {
+  if (!urls || urls.length === 0) return {};
+
   var token = PropertiesService.getScriptProperties().getProperty(CONFIG.PROP_BROWSERLESS_TOKEN);
   if (!token) {
     console.warn('BROWSERLESS_API_TOKEN not set');
-    return null;
+    return {};
   }
 
   var cache = CacheService.getScriptCache();
-  var key = 'br_' + sha1Short(targetUrl);
-  var hit = cache.get(key);
-  if (hit) return hit === '__NULL__' ? null : hit;
+  var result = {};
+  var toFetch = [];
 
-  // Residential proxy (set on the endpoint URL below) bypasses Cloudflare's
-  // datacenter-IP block, so we can hit the rto URL directly — no homepage
-  // prime needed. Saves a goto + ~5s per resolve.
-  var query =
-    'mutation Resolve {\n' +
-    '  visit: goto(url: ' + JSON.stringify(targetUrl) + ', waitUntil: domContentLoaded) { status }\n' +
-    '  pause: waitForTimeout(time: 3500) { time }\n' +
-    '  current: url { url }\n' +
-    '}';
+  // Serve cached results first.
+  for (var i = 0; i < urls.length; i++) {
+    var u = urls[i];
+    var key = 'br_' + sha1Short(u);
+    var hit = cache.get(key);
+    if (hit) {
+      result[u] = (hit === '__NULL__') ? null : hit;
+    } else {
+      toFetch.push(u);
+    }
+  }
 
-  // Route the whole session through Browserless's residential-IP proxy so
-  // Cloudflare WAF sees a residential IP, not a datacenter one.
+  if (toFetch.length === 0) return result;
+
+  // Process in chunks so the BrowserQL mutation doesn't get too large.
+  for (var start = 0; start < toFetch.length; start += MAX_BATCH_URLS) {
+    var chunk = toFetch.slice(start, start + MAX_BATCH_URLS);
+    var chunkResult = _batchResolve(chunk, token, cache);
+    for (var url in chunkResult) result[url] = chunkResult[url];
+  }
+
+  return result;
+}
+
+function _batchResolve(urls, token, cache) {
+  // Build a single BrowserQL mutation that navigates through each URL
+  // sequentially in the same browser tab, reading the final URL after each.
+  // One session = one credit regardless of how many URLs we visit.
+  var lines = [];
+  for (var i = 0; i < urls.length; i++) {
+    var idx = i + 1;
+    lines.push('  visit' + idx + ': goto(url: ' + JSON.stringify(urls[i]) + ', waitUntil: domContentLoaded) { status }');
+    lines.push('  pause' + idx + ': waitForTimeout(time: 2500) { time }');
+    lines.push('  url' + idx + ': url { url }');
+  }
+  var query = 'mutation ResolveBatch {\n' + lines.join('\n') + '\n}';
+
   var endpoint = BROWSERQL_ENDPOINT +
     '?token=' + encodeURIComponent(token) +
     '&proxy=residential' +
     '&proxyCountry=in';
+
   var resp;
   try {
     resp = UrlFetchApp.fetch(endpoint, {
@@ -52,63 +86,79 @@ function browserlessResolveUrl(targetUrl) {
       muteHttpExceptions: true
     });
   } catch (e) {
-    console.warn('BrowserQL fetch threw: ' + e);
-    return null;
+    console.warn('BrowserQL batch fetch threw: ' + e);
+    return {};
   }
 
   if (resp.getResponseCode() !== 200) {
-    console.warn('BrowserQL HTTP ' + resp.getResponseCode() + ': ' +
+    console.warn('BrowserQL batch HTTP ' + resp.getResponseCode() + ': ' +
       resp.getContentText().substring(0, 300));
-    cache.put(key, '__NULL__', 600);  // brief negative cache (10 min) so we retry sooner
-    return null;
+    return {};
   }
 
   var data;
   try { data = JSON.parse(resp.getContentText()); }
-  catch (e) { console.warn('BrowserQL parse failed: ' + e); return null; }
+  catch (e) { console.warn('BrowserQL batch parse failed: ' + e); return {}; }
 
   if (data && data.errors) {
-    console.warn('BrowserQL returned errors: ' + JSON.stringify(data.errors).substring(0, 300));
-    cache.put(key, '__NULL__', 600);
-    return null;
+    console.warn('BrowserQL batch errors: ' + JSON.stringify(data.errors).substring(0, 300));
+    return {};
   }
 
-  // Prefer the post-wait current URL (catches JS-driven redirects); fall back
-  // to the goto-reported URL if needed.
   var d = data && data.data;
-  var finalUrl = (d && d.current && d.current.url) ||
-                 (d && d.visit && d.visit.url) || null;
-  if (!finalUrl || !/^https?:\/\//i.test(finalUrl)) {
-    console.warn('BrowserQL no url for ' + targetUrl + ': ' +
-      JSON.stringify(data).substring(0, 300));
-    cache.put(key, '__NULL__', 600);
+  var result = {};
+  for (var i = 0; i < urls.length; i++) {
+    var idx = i + 1;
+    var urlData = d && d['url' + idx];
+    var rawUrl = urlData && urlData.url;
+    var finalUrl = _postProcessUrl(rawUrl, urls[i]);
+    result[urls[i]] = finalUrl;
+
+    var cacheKey = 'br_' + sha1Short(urls[i]);
+    if (finalUrl) {
+      cache.put(cacheKey, finalUrl, BROWSERLESS_CACHE_TTL_SECONDS);
+    } else {
+      cache.put(cacheKey, '__NULL__', BROWSERLESS_NEG_CACHE_TTL);
+    }
+  }
+  return result;
+}
+
+// Post-process a raw URL returned by BrowserQL: unwrap linkredirect.in,
+// reject unchanged/invalid URLs. Returns the clean retailer URL or null.
+function _postProcessUrl(finalUrl, inputUrl) {
+  if (!finalUrl || !/^https?:\/\//i.test(finalUrl)) return null;
+  if (finalUrl === inputUrl) {
+    console.warn('BrowserQL returned input unchanged for ' + inputUrl);
     return null;
   }
 
-  // Treat unchanged URL (server didn't redirect) as a failure so the deal
-  // gets dropped rather than keeping the rto link in the sheet.
-  if (finalUrl === targetUrl) {
-    console.warn('BrowserQL returned input unchanged for ' + targetUrl);
-    cache.put(key, '__NULL__', 600);
-    return null;
-  }
-
-  // linkredirect.in is an affiliate middleman between deal sites and retailers
-  // and embeds the actual destination in a ?dl= query param. Skip the extra
-  // navigation hop by extracting it directly.
+  // linkredirect.in embeds the real destination in a ?dl= query param.
   var dlMatch = /[?&]dl=([^&#]+)/i.exec(finalUrl);
-  if (dlMatch && /(^|\.)linkredirect\.in$/i.test((/^https?:\/\/([^\/]+)/i.exec(finalUrl) || [, ''])[1])) {
-    try {
-      var decoded = decodeURIComponent(dlMatch[1]);
-      if (/^https?:\/\//i.test(decoded)) {
-        console.log('linkredirect.in → ' + decoded);
-        finalUrl = decoded;
-      }
-    } catch (e) {}
+  if (dlMatch) {
+    var hostMatch = /^https?:\/\/([^\/]+)/i.exec(finalUrl);
+    var host = hostMatch ? hostMatch[1] : '';
+    if (/(^|\.)linkredirect\.in$/i.test(host)) {
+      try {
+        var decoded = decodeURIComponent(dlMatch[1]);
+        if (/^https?:\/\//i.test(decoded)) {
+          console.log('linkredirect.in → ' + decoded);
+          return decoded;
+        }
+      } catch (e) {}
+    }
   }
 
-  cache.put(key, finalUrl, BROWSERLESS_CACHE_TTL_SECONDS);
   return finalUrl;
+}
+
+// ---------------------------------------------------------------------------
+// Single-URL resolver (backwards-compatible, uses batch internally).
+// ---------------------------------------------------------------------------
+function browserlessResolveUrl(targetUrl) {
+  if (!targetUrl) return null;
+  var results = browserlessResolveUrls([targetUrl]);
+  return results[targetUrl] || null;
 }
 
 function _testBrowserless() {
@@ -117,20 +167,22 @@ function _testBrowserless() {
   console.log('Output: ' + browserlessResolveUrl(rto));
 }
 
-// Cache-bypassing diagnostic with explicit step-by-step logging.
+function _testBrowserlessBatch() {
+  var urls = [
+    'https://www.indiafreestuff.in/?rto=MjM3ODE1NDM4Mw==',
+    'https://www.indiafreestuff.in/?rto=Mjg2ODk2NTI5Nw=='
+  ];
+  console.log(JSON.stringify(browserlessResolveUrls(urls), null, 2));
+}
+
+// Cache-bypassing diagnostic.
 function _testBrowserlessFresh() {
   var rto = 'https://www.indiafreestuff.in/?rto=MjM3ODE1NDM4Mw==';
   var cache = CacheService.getScriptCache();
   var key = 'br_' + sha1Short(rto);
-  console.log('Cache key   : ' + key);
-  console.log('Before clear: ' + (cache.get(key) || '(empty)'));
   cache.remove(key);
-  console.log('After clear : ' + (cache.get(key) || '(empty)'));
-  console.log('Token set?  : ' + !!PropertiesService.getScriptProperties().getProperty(CONFIG.PROP_BROWSERLESS_TOKEN));
-  console.log('Input       : ' + rto);
+  console.log('Token set? ' + !!PropertiesService.getScriptProperties().getProperty(CONFIG.PROP_BROWSERLESS_TOKEN));
   var t0 = new Date().getTime();
   var out = browserlessResolveUrl(rto);
-  var ms = new Date().getTime() - t0;
-  console.log('Output      : ' + out);
-  console.log('Took        : ' + ms + 'ms');
+  console.log('Output: ' + out + ' (' + (new Date().getTime() - t0) + 'ms)');
 }

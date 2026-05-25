@@ -20,32 +20,59 @@
 //     </div>
 //   </div>
 //
-// When the card includes Shop Now (?rto=XXX) we chase that redirect to the
-// final Amazon URL. When it doesn't (e.g. pre-book / Super Deal layouts),
-// we fall back to fetching the detail page and grabbing the first amazon
-// anchor there.
+// Buy-link strategy:
+//   amazon  → rto URL passed directly to Ekaro (no Browserless needed)
+//   others  → ALL non-Amazon rto URLs are resolved in ONE batched BrowserQL
+//             call per fetch() invocation (one credit, not one-per-URL)
 
 var IndiaFreeStuff = (function () {
   var NAME = 'indiafreestuff';
   var ENDPOINT = 'https://www.indiafreestuff.in/pages/getdeals';
-  // Amazon cards skip Browserless (rto URL fed straight to Ekaro), so they're
-  // cheap; only non-Amazon cards pay the ~20s Browserless cost. Cap at a
-  // size that keeps the worst-case mix inside Apps Script's 6-minute budget
-  // even if most cards turn out to be Flipkart.
   var MAX_CARDS = 20;
 
   function fetch() {
-    // The site 403s Apps Script's IP range; go via the Cloudflare Worker proxy.
     var html = fetchViaProxy(ENDPOINT);
     var cards = splitCards(html).slice(0, MAX_CARDS);
-    var deals = [];
+
+    // First pass: parse cards without resolving non-Amazon rto links.
+    var parsed = [];
+    var rtoUrlsToResolve = [];
     for (var i = 0; i < cards.length; i++) {
       try {
         var d = parseCard(cards[i]);
-        if (d) deals.push(d);
+        if (!d) continue;
+        parsed.push(d);
+        // Queue rto URLs that need Browserless resolution (non-Amazon).
+        if (d._pendingRto) rtoUrlsToResolve.push(d._pendingRto);
       } catch (e) {
         console.warn(NAME + ' card ' + i + ' failed: ' + e);
       }
+    }
+
+    // Second pass: resolve all pending rto links in ONE batch BrowserQL call.
+    var resolved = {};
+    if (rtoUrlsToResolve.length > 0) {
+      console.log(NAME + ': resolving ' + rtoUrlsToResolve.length +
+        ' non-Amazon rto URLs in one batch');
+      try {
+        resolved = browserlessResolveUrls(rtoUrlsToResolve);
+      } catch (e) {
+        console.warn(NAME + ' batch resolve threw: ' + e);
+      }
+    }
+
+    // Apply resolved URLs to deals.
+    var deals = [];
+    for (var j = 0; j < parsed.length; j++) {
+      var deal = parsed[j];
+      if (deal._pendingRto) {
+        var url = resolved[deal._pendingRto];
+        if (url && !/^https?:\/\/(?:www\.)?indiafreestuff\.in/i.test(url)) {
+          deal.buyLink = url;
+        }
+        delete deal._pendingRto;
+      }
+      deals.push(deal);
     }
     return deals;
   }
@@ -65,8 +92,6 @@ var IndiaFreeStuff = (function () {
   }
 
   function parseCard(block) {
-    // Find the <a class="...item-title..."> anchor and extract href + inner text
-    // regardless of attribute order.
     var titleAnchorM = /<a\b[^>]*\bclass="[^"]*\bitem-title\b[^"]*"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
     if (!titleAnchorM) return null;
     var titleHrefM = /\bhref="([^"]+)"/i.exec(titleAnchorM[0]);
@@ -74,7 +99,6 @@ var IndiaFreeStuff = (function () {
     var detailUrl = titleHrefM[1];
     var title = stripTags(titleAnchorM[1]);
 
-    // Image may live inside <div class="product-img"> or an anchor with that class.
     var imgM =
       /<(?:a|div)[^>]*class="[^"]*\bproduct-img\b[^"]*"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"/i.exec(block) ||
       /<img[^>]+src="([^"]+)"[^>]*class="[^"]*\blazy\b[^"]*"/i.exec(block);
@@ -85,7 +109,7 @@ var IndiaFreeStuff = (function () {
     var current = newM ? parsePrice(stripTags(newM[1])) : null;
     var original = oldM ? parsePrice(stripTags(oldM[1])) : null;
 
-    // Find the rto Shop Now URL from the card (attribute-order-agnostic).
+    // Find the rto Shop Now URL (attribute-order-agnostic).
     var shopAnchorM = /<a\b[^>]*\bclass="[^"]*\bbtn-shopnow\b[^"]*"[^>]*>/i.exec(block);
     var rtoUrl = null;
     if (shopAnchorM) {
@@ -93,37 +117,25 @@ var IndiaFreeStuff = (function () {
       if (hrefM) rtoUrl = hrefM[1];
     }
 
-    // The card also contains a small brand logo anchor pointing at
-    //   https://www.indiafreestuff.in/stores/<merchant>
-    // Use that to tag the merchant column AND decide how to resolve the link.
+    // Merchant from brand logo anchor: /stores/<merchant>
     var merchant = null;
     var brandM = /<a[^>]+href="https?:\/\/(?:www\.)?indiafreestuff\.in\/stores\/([a-z0-9_-]+)"/i.exec(block);
     if (brandM) merchant = brandM[1].toLowerCase();
 
-    // Buy-link strategy depends on the merchant:
-    //   amazon → Ekaro recognises and converts the bare rto URL itself, so
-    //            we hand it the rto without resolving. Fast and free.
-    //   anything else (flipkart, myntra, etc.) → we need the actual retailer
-    //            URL. Resolve via Browserless (residential proxy + JS),
-    //            unwrapping any linkredirect.in middleman. If Browserless
-    //            is unavailable (no token, quota exhausted, network error),
-    //            we silently drop just this card — BigTricks and Amazon-IFS
-    //            cards in the same cycle are unaffected.
     var buyLink = null;
+    var pendingRto = null;
+
     if (rtoUrl) {
       if (merchant === 'amazon') {
+        // Ekaro can convert Amazon rto URLs directly — no Browserless needed.
         buyLink = rtoUrl;
       } else {
-        var resolved;
-        try { resolved = browserlessResolveUrl(rtoUrl); }
-        catch (e) { console.warn(NAME + ' browserless threw: ' + e); resolved = null; }
-        if (resolved && !/^https?:\/\/(?:www\.)?indiafreestuff\.in/i.test(resolved)) {
-          buyLink = resolved;
-        }
+        // Queue for batch Browserless resolution in fetch().
+        pendingRto = rtoUrl;
       }
     }
 
-    return {
+    var deal = {
       source: NAME,
       title: title,
       currentPrice: current,
@@ -134,14 +146,13 @@ var IndiaFreeStuff = (function () {
       buyLink: buyLink,
       id: sha1Short(detailUrl + '|' + title)
     };
+    if (pendingRto) deal._pendingRto = pendingRto;
+    return deal;
   }
 
   return { name: NAME, fetch: fetch };
 })();
 
-// Quick test of the new session-aware resolver. Replace the rto URL with one
-// from your live sheet (right-click an indiafreestuff Source Link row → open
-// → right-click Shop Now → copy link).
 function _testRtoResolveSession() {
   var rto = 'https://www.indiafreestuff.in/?rto=Mjg2ODk2NTI5Nw==';
   console.log('Input : ' + rto);
