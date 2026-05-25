@@ -1,6 +1,6 @@
 // Global configuration constants.
 var CONFIG = {
-  POLL_MINUTES: 45,
+  POLL_MINUTES: 30,
   MAX_ROWS: 50,
   SHEET_NAME: 'Deals',
   SEEN_CAP: 2000,
