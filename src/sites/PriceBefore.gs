@@ -40,12 +40,17 @@ var PriceBefore = (function () {
   }
 
   function extractItems(html) {
-    var listM = /<ul[^>]+class="[^"]*\bproduct-list\b[^"]*"[^>]*>([\s\S]*?)<\/ul>/i.exec(html);
-    var scope = listM ? listM[1] : html;
-    var out = [];
-    var re = /<li\b[^>]*class="[^"]*\bitem\b[^"]*"[^>]*>([\s\S]*?)<\/li>/gi;
+    // Split on <li class="item"> open tags, then take the content between
+    // consecutive splits to avoid the nested-regex duplicate problem.
+    var positions = [];
+    var re = /<li\b[^>]*class="[^"]*\bitem\b[^"]*"[^>]*>/gi;
     var m;
-    while ((m = re.exec(scope)) !== null) out.push(m[1]);
+    while ((m = re.exec(html)) !== null) positions.push(m.index);
+    var out = [];
+    for (var i = 0; i < positions.length; i++) {
+      var end = i + 1 < positions.length ? positions[i + 1] : positions[i] + 5000;
+      out.push(html.substring(positions[i], end));
+    }
     return out;
   }
 
@@ -59,7 +64,9 @@ var PriceBefore = (function () {
     var detailUrl = /^https?:\/\//i.test(detailPath) ? detailPath : BASE + (detailPath.charAt(0) === '/' ? detailPath : '/' + detailPath);
     var title = stripTags(anchorM[2] || anchorM[3]);
 
-    var imgM = /<img[^>]+src="([^"]+)"/i.exec(block);
+    // Images are lazy-loaded — real URL is in data-src, src is a placeholder.
+    var imgM = /<img[^>]+data-src="([^"]+)"/i.exec(block) ||
+               /<img[^>]+src="([^"]+)"/i.exec(block);
     var image = imgM ? imgM[1] : '';
 
     // Current price from <div class="price">
