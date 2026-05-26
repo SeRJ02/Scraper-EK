@@ -94,10 +94,10 @@ var PriceBefore = (function () {
       // Amazon
       var amzM = /href="(https?:\/\/(?:www\.)?amazon\.in\/[^"]+)"/i.exec(html) ||
                  /href="(https?:\/\/amzn\.(?:to|in)\/[^"]+)"/i.exec(html);
-      if (amzM) return { buyLink: amzM[1], merchant: 'amazon' };
+      if (amzM) return { buyLink: decodeEntities(amzM[1]), merchant: 'amazon' };
       // Flipkart
       var fkM = /href="(https?:\/\/(?:www\.)?flipkart\.com\/[^"]+)"/i.exec(html);
-      if (fkM) return { buyLink: fkM[1], merchant: 'flipkart' };
+      if (fkM) return { buyLink: decodeEntities(fkM[1]), merchant: 'flipkart' };
     } catch (e) {
       console.warn(NAME + ' detail fetch failed for ' + detailUrl + ': ' + e);
     }
