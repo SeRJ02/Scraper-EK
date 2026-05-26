@@ -35,9 +35,8 @@ function runScrape() {
         unseen.push(deal);
       }
 
-      // Batch-resolve any pending rto links — only for the unseen deals.
-      // This is the key credit saver: ~85% of cards are duplicates and never
-      // reach this point, so Browserless is only called for genuinely new deals.
+      // Batch-resolve any pending rto links (IndiaFreeStuff Flipkart cards) —
+      // only for unseen deals. Browserless only called for genuinely new deals.
       var pendingUrls = [];
       for (var u = 0; u < unseen.length; u++) {
         if (unseen[u]._pendingRto) pendingUrls.push(unseen[u]._pendingRto);
@@ -51,12 +50,21 @@ function runScrape() {
 
       for (var u = 0; u < unseen.length; u++) {
         var deal = unseen[u];
+
+        // Resolve IndiaFreeStuff rto links.
         if (deal._pendingRto) {
           var url = resolved[deal._pendingRto];
           if (url && !/^https?:\/\/(?:www\.)?indiafreestuff\.in/i.test(url)) {
             deal.buyLink = url;
           }
           delete deal._pendingRto;
+        }
+
+        // Resolve PriceBefore detail pages (direct HTTP, no Browserless).
+        if (deal._pendingDetail && site.resolveDetail) {
+          var r = site.resolveDetail(deal._pendingDetail);
+          if (r) { deal.buyLink = r.buyLink; deal.merchant = r.merchant; }
+          delete deal._pendingDetail;
         }
 
         if (!deal.buyLink) {
