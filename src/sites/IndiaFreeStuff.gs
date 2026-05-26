@@ -21,9 +21,9 @@
 //   </div>
 //
 // Buy-link strategy:
-//   amazon  → rto URL passed directly to Ekaro (no Browserless needed)
-//   others  → ALL non-Amazon rto URLs are resolved in ONE batched BrowserQL
-//             call per fetch() invocation (one credit, not one-per-URL)
+//   amazon  → rto URL set as buyLink directly (Ekaro converts it, no Browserless)
+//   others  → _pendingRto field is set; Main.gs resolves it AFTER the seenIds
+//             filter so Browserless is only called for genuinely new deals
 
 var IndiaFreeStuff = (function () {
   var NAME = 'indiafreestuff';
@@ -34,45 +34,16 @@ var IndiaFreeStuff = (function () {
     var html = fetchViaProxy(ENDPOINT);
     var cards = splitCards(html).slice(0, MAX_CARDS);
 
-    // First pass: parse cards without resolving non-Amazon rto links.
-    var parsed = [];
-    var rtoUrlsToResolve = [];
+    // Parse cards and return immediately — non-Amazon rto links are left as
+    // _pendingRto for Main.gs to resolve after the seenIds filter.
+    var deals = [];
     for (var i = 0; i < cards.length; i++) {
       try {
         var d = parseCard(cards[i]);
-        if (!d) continue;
-        parsed.push(d);
-        // Queue rto URLs that need Browserless resolution (non-Amazon).
-        if (d._pendingRto) rtoUrlsToResolve.push(d._pendingRto);
+        if (d) deals.push(d);
       } catch (e) {
         console.warn(NAME + ' card ' + i + ' failed: ' + e);
       }
-    }
-
-    // Second pass: resolve all pending rto links in ONE batch BrowserQL call.
-    var resolved = {};
-    if (rtoUrlsToResolve.length > 0) {
-      console.log(NAME + ': resolving ' + rtoUrlsToResolve.length +
-        ' non-Amazon rto URLs in one batch');
-      try {
-        resolved = browserlessResolveUrls(rtoUrlsToResolve);
-      } catch (e) {
-        console.warn(NAME + ' batch resolve threw: ' + e);
-      }
-    }
-
-    // Apply resolved URLs to deals.
-    var deals = [];
-    for (var j = 0; j < parsed.length; j++) {
-      var deal = parsed[j];
-      if (deal._pendingRto) {
-        var url = resolved[deal._pendingRto];
-        if (url && !/^https?:\/\/(?:www\.)?indiafreestuff\.in/i.test(url)) {
-          deal.buyLink = url;
-        }
-        delete deal._pendingRto;
-      }
-      deals.push(deal);
     }
     return deals;
   }

@@ -14,7 +14,7 @@
 
 var BROWSERQL_ENDPOINT = 'https://production-sfo.browserless.io/chromium/bql';
 var BROWSERLESS_CACHE_TTL_SECONDS = 21600; // 6h
-var BROWSERLESS_NEG_CACHE_TTL = 600;       // 10 min negative cache
+var BROWSERLESS_NEG_CACHE_TTL = 21600;     // 6h negative cache (same as success)
 
 // ---------------------------------------------------------------------------
 // Batch resolver — resolves up to MAX_BATCH_URLS URLs in a single BrowserQL

@@ -22,14 +22,42 @@ function runScrape() {
         console.error(site.name + ' fetch threw: ' + e);
         continue;
       }
+
+      // Filter to unseen deals first, before any expensive resolution.
+      var unseen = [];
       for (var d = 0; d < deals.length; d++) {
         var deal = deals[d];
         if (!deal || !deal.id) continue;
         if (seenSet[deal.id]) continue;
-        // Mark seen even if we end up dropping the deal, so we don't burn
-        // affiliate-API quota retrying the same un-convertible link every cycle.
+        // Mark seen now so retries don't re-process the same deal next cycle.
         seenSet[deal.id] = true;
         state.seenIds.push(deal.id);
+        unseen.push(deal);
+      }
+
+      // Batch-resolve any pending rto links — only for the unseen deals.
+      // This is the key credit saver: ~85% of cards are duplicates and never
+      // reach this point, so Browserless is only called for genuinely new deals.
+      var pendingUrls = [];
+      for (var u = 0; u < unseen.length; u++) {
+        if (unseen[u]._pendingRto) pendingUrls.push(unseen[u]._pendingRto);
+      }
+      var resolved = {};
+      if (pendingUrls.length > 0) {
+        console.log(site.name + ': resolving ' + pendingUrls.length + ' new rto URL(s)');
+        try { resolved = browserlessResolveUrls(pendingUrls); }
+        catch (e) { console.warn(site.name + ' batch resolve threw: ' + e); }
+      }
+
+      for (var u = 0; u < unseen.length; u++) {
+        var deal = unseen[u];
+        if (deal._pendingRto) {
+          var url = resolved[deal._pendingRto];
+          if (url && !/^https?:\/\/(?:www\.)?indiafreestuff\.in/i.test(url)) {
+            deal.buyLink = url;
+          }
+          delete deal._pendingRto;
+        }
 
         if (!deal.buyLink) {
           console.log('Drop (no buyLink): ' + (deal.title || deal.id));
