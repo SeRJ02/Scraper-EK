@@ -81,17 +81,39 @@ function runScrape() {
       }
     }
 
+    var insertedCount = 0;
     if (newDeals.length) {
-      // Most recently discovered new deal lands at row 1.
+      // Most recently discovered new deal lands at row 2; insert above existing rows.
       newDeals.reverse();
       state.topDeals = newDeals.concat(state.topDeals).slice(0, CONFIG.MAX_ROWS);
-      writeTopDeals(state.topDeals);
+      writeTopDeals(newDeals);
+      insertedCount = newDeals.length;
       console.log('Pushed ' + newDeals.length + ' new deal(s) to the sheet.');
     } else if (state.topDeals.length === 0) {
-      // First-ever run with nothing seen — still draw header & blank rows.
-      writeTopDeals([]);
+      // First-ever run with nothing seen — ensure header exists.
+      getSheet();
     } else {
       console.log('No new deals this cycle.');
+    }
+
+    // Always refresh rows 3-4 with fresh top-2 Myntra deals (no seenIds dedup).
+    try {
+      var myntraDeals = OffertagMyntra.fetch();
+      var myntraReady = [];
+      for (var m = 0; m < myntraDeals.length; m++) {
+        var md = myntraDeals[m];
+        if (!md.buyLink) continue;
+        var mLink = convertAffiliateLink(md.buyLink);
+        if (!mLink) { console.log('Myntra drop (affiliate failed): ' + md.title); continue; }
+        md.buyLink = mLink;
+        myntraReady.push(md);
+      }
+      if (myntraReady.length > 0) {
+        writeMyntraDeals(myntraReady, insertedCount);
+        console.log('Myntra: wrote ' + myntraReady.length + ' deal(s) to rows 3-4.');
+      }
+    } catch (e) {
+      console.warn('Myntra scrape/write failed: ' + e);
     }
 
     saveState(state);
