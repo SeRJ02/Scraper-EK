@@ -97,23 +97,28 @@ function runScrape() {
     }
 
     // Always refresh rows 3-4 with fresh top-2 Myntra deals (no seenIds dedup).
+    var myntraAdded = 0;
     try {
       var myntraDeals = OffertagMyntra.fetch();
-      var myntraReady = [];
-      for (var m = 0; m < myntraDeals.length; m++) {
-        var md = myntraDeals[m];
-        if (!md.buyLink) continue;
-        var mLink = convertAffiliateLink(md.buyLink);
-        if (!mLink) { console.log('Myntra drop (affiliate failed): ' + md.title); continue; }
-        md.buyLink = mLink;
-        myntraReady.push(md);
-      }
+      var myntraReady = _convertPinnedDeals(myntraDeals, 'Myntra');
       if (myntraReady.length > 0) {
-        writeMyntraDeals(myntraReady, insertedCount);
+        myntraAdded = writeMyntraDeals(myntraReady, insertedCount);
         console.log('Myntra: wrote ' + myntraReady.length + ' deal(s) to rows 3-4.');
       }
     } catch (e) {
       console.warn('Myntra scrape/write failed: ' + e);
+    }
+
+    // Always refresh rows 7-8 with fresh top-2 Ajio deals (no seenIds dedup).
+    try {
+      var ajioDeals = SmartprixAjio.fetch();
+      var ajioReady = _convertPinnedDeals(ajioDeals, 'Ajio');
+      if (ajioReady.length > 0) {
+        writeAjioDeals(ajioReady, insertedCount + myntraAdded);
+        console.log('Ajio: wrote ' + ajioReady.length + ' deal(s) to rows 7-8.');
+      }
+    } catch (e) {
+      console.warn('Ajio scrape/write failed: ' + e);
     }
 
     saveState(state);
@@ -151,4 +156,19 @@ function teardown() {
 function resetState() {
   clearState();
   console.log('State cleared.');
+}
+
+// Convert buyLinks for pinned-slot deals (Myntra/Ajio) via the affiliate API.
+// Drops any deal whose conversion fails.
+function _convertPinnedDeals(deals, label) {
+  var out = [];
+  for (var i = 0; i < deals.length; i++) {
+    var d = deals[i];
+    if (!d.buyLink) continue;
+    var link = convertAffiliateLink(d.buyLink);
+    if (!link) { console.log(label + ' drop (affiliate failed): ' + d.title); continue; }
+    d.buyLink = link;
+    out.push(d);
+  }
+  return out;
 }

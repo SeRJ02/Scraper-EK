@@ -86,26 +86,42 @@ function writeTopDeals(newDeals) {
 // insertedAbove = number of rows just inserted by writeTopDeals (0 if no new deals).
 // The old Myntra rows (previously at 3-4) shifted down by insertedAbove; we delete
 // them before inserting fresh ones so the sheet doesn't grow unboundedly.
+// Returns the net number of rows added (2 on first-ever write, 0 in steady state)
+// so the next pinned writer can compute its offset correctly.
 function writeMyntraDeals(deals, insertedAbove) {
-  if (!deals || deals.length === 0) return;
+  if (!deals || deals.length === 0) return 0;
+  return _writePinnedDeals(deals, 3, insertedAbove);
+}
+
+// Refresh rows 7-8 with the top-2 Ajio deals (no seenIds dedup).
+// insertedAbove must include both the newDeals count AND any net rows added
+// by writeMyntraDeals this cycle.
+function writeAjioDeals(deals, insertedAbove) {
+  if (!deals || deals.length === 0) return 0;
+  return _writePinnedDeals(deals, 7, insertedAbove);
+}
+
+// Delete the 2 old pinned rows (if present), insert 2 fresh ones at pinRow.
+// Returns net rows added (0 if old rows existed, otherwise 2).
+function _writePinnedDeals(deals, pinRow, insertedAbove) {
   var sheet = getSheet();
   var lastRow = sheet.getLastRow();
-
-  // Delete the old Myntra rows that shifted down (only after first-ever Myntra write).
-  // oldMyntraStart = 3 + insertedAbove; we delete up to 2 rows there.
-  var oldStart = 3 + insertedAbove;
-  if (lastRow >= oldStart) {
-    var toDelete = Math.min(2, lastRow - oldStart + 1);
-    sheet.deleteRows(oldStart, toDelete);
+  var oldStart = pinRow + insertedAbove;
+  var added = 2;
+  if (lastRow >= oldStart + 1) {
+    sheet.deleteRows(oldStart, 2);
+    added = 0;
+  } else if (lastRow >= oldStart) {
+    sheet.deleteRows(oldStart, 1);
+    added = 1;
   }
-
-  // Insert 2 fresh rows at position 3.
-  sheet.insertRowsBefore(3, 2);
+  sheet.insertRowsBefore(pinRow, 2);
   var rows = [];
   for (var i = 0; i < 2; i++) {
     rows.push(deals[i] ? buildDealRow(deals[i]) : ['', '', '', '', '', '', '', '', '']);
   }
-  sheet.getRange(3, 1, 2, HEADERS.length).setValues(rows);
+  sheet.getRange(pinRow, 1, 2, HEADERS.length).setValues(rows);
+  return added;
 }
 
 function escapeFormula(s) {
