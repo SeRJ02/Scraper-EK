@@ -1,11 +1,18 @@
 // Scraper for https://www.smartprix.com/deals/ajio-store
 //
-// Fetches top deals on the Ajio store page on Smartprix. Picks top-2 by
-// highest discount % and always refreshes rows 7-8 each cycle (no seenIds dedup).
+// Card structure (confirmed from live HTML):
+//   <div class="sm-deal" data-way>
+//     <div class="sm-img-wrap"><img class="sm-img" src="CDN_URL" alt="TITLE"></div>
+//     <a href="/nf/dl/..." class="name clamp-3">TITLE</a>
+//     <span class="price">From ₹375</span>
+//     <div class="store">
+//       <a class="sm-btn ..." href="https://l.smartprix.com/l?k=...">Visit</a>
+//     </div>
+//   </div>
 //
-// NOTE: card selectors below are based on Smartprix's typical deal-card markup.
-// If the page renders differently, run _debugSmartprixAjio() to dump the
-// raw HTML and adjust the regexes.
+// Buy link is a smartprix redirect (l.smartprix.com/l?k=...) resolved via
+// proxyResolveUrl — only called for the top-2 cards to avoid extra proxy hits.
+// Discount % is parsed from the title text ("Min. 60% OFF", "Upto 90% off").
 
 var SmartprixAjio = (function () {
   var NAME = 'ajio';
@@ -22,20 +29,29 @@ var SmartprixAjio = (function () {
     for (var i = 0; i < cards.length; i++) {
       try {
         var d = parseCard(cards[i]);
-        if (d && d.buyLink) deals.push(d);
+        if (d) deals.push(d);
       } catch (e) {
         console.warn(NAME + ' card ' + i + ' failed: ' + e);
       }
     }
+
+    // Sort by discount first, then resolve redirect links only for the top-N
+    // to avoid unnecessary proxy calls for the rest of the cards.
     deals.sort(function (a, b) { return (b.discount || 0) - (a.discount || 0); });
-    return deals.slice(0, TOP_N);
+    var top = deals.slice(0, TOP_N);
+    for (var j = 0; j < top.length; j++) {
+      if (top[j]._rawLink) {
+        var resolved = proxyResolveUrl(top[j]._rawLink);
+        top[j].buyLink = resolved || null;
+        delete top[j]._rawLink;
+      }
+    }
+    return top.filter(function (d) { return d.buyLink; });
   }
 
-  // Smartprix deal cards: <div class="dlst-itm"> wrappers. Fallback to
-  // generic deal-card class names if the markup uses a different wrapper.
   function splitCards(html) {
     var positions = [];
-    var re = /<div\b[^>]*class="[^"]*\b(?:dlst-itm|sm-deal|deal-card|prd-itm)\b[^"]*"[^>]*>/gi;
+    var re = /<div\b[^>]*class="[^"]*\bsm-deal\b[^"]*"[^>]*>/gi;
     var m;
     while ((m = re.exec(html)) !== null) positions.push(m.index);
     var out = [];
@@ -47,49 +63,42 @@ var SmartprixAjio = (function () {
   }
 
   function parseCard(block) {
-    // Outbound link: prefer a direct ajio.com URL if present, otherwise the
-    // Smartprix /out/ redirector — the worker can resolve that on demand.
-    var ajioM = /href="(https?:\/\/(?:www\.)?ajio\.com\/[^"]+)"/i.exec(block);
-    var buyLink = ajioM ? decodeEntities(ajioM[1]) : null;
-    if (!buyLink) {
-      var outM = /href="(https?:\/\/(?:www\.)?smartprix\.com\/out\/[^"]+)"/i.exec(block);
-      if (outM) buyLink = decodeEntities(outM[1]);
-    }
-
-    // Title: alt on the image, or <h3>/<h2>/<a class*=title>
-    var titleM = /<img[^>]+alt="([^"]+)"/i.exec(block) ||
-                 /<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/i.exec(block) ||
-                 /<a[^>]+class="[^"]*\btitle\b[^"]*"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
+    // Title from <a class="name clamp-3">
+    var titleM = /<a\b[^>]*class="[^"]*\bname\b[^"]*"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
     var title = titleM ? stripTags(titleM[1]) : '';
+    if (!title) return null;
 
-    // Image — Smartprix uses data-src for lazy-loaded images.
-    var imgM = /<img[^>]+data-src="([^"]+)"/i.exec(block) ||
-               /<img[^>]+src="(https?:\/\/[^"]+)"/i.exec(block);
-    var image = imgM ? imgM[1] : '';
-
-    // Prices: common class patterns on Smartprix.
-    var currentM = /<[^>]*class="[^"]*\b(?:price|sm-prc|deal-price|new-price)\b[^"]*"[^>]*>([\s\S]*?)<\/[^>]+>/i.exec(block);
-    var originalM = /<[^>]*class="[^"]*\b(?:mrp|old-price|original-price|sm-mrp|strike)\b[^"]*"[^>]*>([\s\S]*?)<\/[^>]+>/i.exec(block);
-    var current = currentM ? parsePrice(stripTags(currentM[1])) : null;
-    var original = originalM ? parsePrice(stripTags(originalM[1])) : null;
-
-    // Discount % — explicit element if present, otherwise computed.
-    var discM = /<[^>]*class="[^"]*\b(?:discount|off|sm-off)\b[^"]*"[^>]*>([\s\S]*?)<\/[^>]+>/i.exec(block);
-    var discount = discM ? (parseFloat(stripTags(discM[1])) || 0) : 0;
-    if (!discount && current && original && original > current) {
-      discount = Math.round((original - current) * 100 / original);
+    // Image from <img class="sm-img">
+    var imgM = /<img\b[^>]*\bsm-img\b[^>]*>/i.exec(block);
+    var image = '';
+    if (imgM) {
+      var srcM = /\bsrc="([^"]+)"/i.exec(imgM[0]);
+      if (srcM) image = srcM[1];
     }
+
+    // Current price from <span class="price">
+    var priceM = /<span\b[^>]*class="[^"]*\bprice\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i.exec(block);
+    var current = priceM ? parsePrice(stripTags(priceM[1])) : null;
+
+    // Discount % parsed from title text: "Min. 60% OFF" / "Upto 90% off" / "60% off"
+    var discM = /(\d+)\s*%\s*off/i.exec(title);
+    var discount = discM ? parseInt(discM[1], 10) : 0;
+
+    // Raw redirect link from the Visit button — resolved later for top-N only.
+    var visitM = /href="(https?:\/\/l\.smartprix\.com\/l\?[^"]+)"/i.exec(block);
+    var rawLink = visitM ? decodeEntities(visitM[1]) : null;
 
     return {
       source: NAME,
       title: title,
       currentPrice: current,
-      originalPrice: original,
+      originalPrice: null,
       imageUrl: image,
       sourceLink: ENDPOINT,
       merchant: 'ajio',
-      buyLink: buyLink,
-      id: sha1Short((buyLink || '') + '|' + title),
+      buyLink: null,
+      _rawLink: rawLink,
+      id: sha1Short((rawLink || '') + '|' + title),
       discount: discount
     };
   }
@@ -101,21 +110,17 @@ function _testSmartprixAjio() {
   console.log(JSON.stringify(SmartprixAjio.fetch(), null, 2));
 }
 
-// Dump card structure so we can verify selectors against the actual markup.
 function _debugSmartprixAjio() {
   var html = fetchViaProxy('https://www.smartprix.com/deals/ajio-store');
   console.log('HTML length: ' + html.length);
   console.log('sm-deal hits: ' + (html.match(/sm-deal/g) || []).length);
-  console.log('ajio.com hits: ' + (html.match(/ajio\.com/g) || []).length);
-  console.log('/out/ hits: ' + (html.match(/\/out\//g) || []).length);
-
-  // Print the first 2 card blocks raw so we can read the actual class names.
+  console.log('l.smartprix.com hits: ' + (html.match(/l\.smartprix\.com/g) || []).length);
   var positions = [];
   var re = /<div\b[^>]*class="[^"]*\bsm-deal\b[^"]*"[^>]*>/gi;
   var m;
   while ((m = re.exec(html)) !== null) positions.push(m.index);
   for (var i = 0; i < Math.min(2, positions.length); i++) {
     var end = i + 1 < positions.length ? positions[i + 1] : positions[i] + 3000;
-    console.log('--- CARD ' + (i+1) + ' ---\n' + html.substring(positions[i], end));
+    console.log('--- CARD ' + (i + 1) + ' ---\n' + html.substring(positions[i], end));
   }
 }
