@@ -101,13 +101,21 @@ function _testSmartprixAjio() {
   console.log(JSON.stringify(SmartprixAjio.fetch(), null, 2));
 }
 
-// Dump the first card block raw so we can verify selectors against the actual markup.
+// Dump card structure so we can verify selectors against the actual markup.
 function _debugSmartprixAjio() {
   var html = fetchViaProxy('https://www.smartprix.com/deals/ajio-store');
   console.log('HTML length: ' + html.length);
-  console.log('dlst-itm hits: ' + (html.match(/dlst-itm/g) || []).length);
-  console.log('sm-deal hits: '  + (html.match(/sm-deal/g)  || []).length);
-  console.log('deal-card hits: '+ (html.match(/deal-card/g)|| []).length);
-  console.log('ajio.com hits: ' + (html.match(/ajio\.com/g)|| []).length);
-  console.log('First 2000 chars:\n' + html.substring(0, 2000));
+  console.log('sm-deal hits: ' + (html.match(/sm-deal/g) || []).length);
+  console.log('ajio.com hits: ' + (html.match(/ajio\.com/g) || []).length);
+  console.log('/out/ hits: ' + (html.match(/\/out\//g) || []).length);
+
+  // Print the first 2 card blocks raw so we can read the actual class names.
+  var positions = [];
+  var re = /<div\b[^>]*class="[^"]*\bsm-deal\b[^"]*"[^>]*>/gi;
+  var m;
+  while ((m = re.exec(html)) !== null) positions.push(m.index);
+  for (var i = 0; i < Math.min(2, positions.length); i++) {
+    var end = i + 1 < positions.length ? positions[i + 1] : positions[i] + 3000;
+    console.log('--- CARD ' + (i+1) + ' ---\n' + html.substring(positions[i], end));
+  }
 }
