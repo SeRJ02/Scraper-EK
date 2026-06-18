@@ -64,7 +64,7 @@ function buildDealRow(d) {
     d.currentPrice  == null ? '' : '₹' + d.currentPrice,
     MERCHANT_COMMISSION[merchant] || '',
     MERCHANT_LOGO[merchant] || '',
-    d.imageUrl ? '=IMAGE("' + escapeFormula(d.imageUrl) + '")' : '',
+    d.imageUrl || '',
     BUTTON_TEXT_CONST,
     BUTTON_LINK_CONST,
     d.buyLink || d.amazonLink || ''
