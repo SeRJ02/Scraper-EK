@@ -43,9 +43,11 @@ function runScrape() {
       }
       var resolved = {};
       if (pendingUrls.length > 0) {
-        console.log(site.name + ': resolving ' + pendingUrls.length + ' new rto URL(s)');
-        try { resolved = browserlessResolveUrls(pendingUrls); }
-        catch (e) { console.warn(site.name + ' batch resolve threw: ' + e); }
+        console.log(site.name + ': resolving ' + pendingUrls.length + ' new rto URL(s) via worker');
+        for (var p = 0; p < pendingUrls.length; p++) {
+          try { resolved[pendingUrls[p]] = proxyResolveSessionUrl(pendingUrls[p]); }
+          catch (e) { console.warn(site.name + ' resolve threw for ' + pendingUrls[p] + ': ' + e); }
+        }
       }
 
       for (var u = 0; u < unseen.length; u++) {
