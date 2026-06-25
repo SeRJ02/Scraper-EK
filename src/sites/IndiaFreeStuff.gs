@@ -94,17 +94,9 @@ var IndiaFreeStuff = (function () {
     if (brandM) merchant = brandM[1].toLowerCase();
 
     var buyLink = null;
-    var pendingRto = null;
-
-    if (rtoUrl) {
-      if (merchant === 'amazon') {
-        // Ekaro can convert Amazon rto URLs directly — no Browserless needed.
-        buyLink = rtoUrl;
-      } else {
-        // Queue for batch Browserless resolution in fetch().
-        pendingRto = rtoUrl;
-      }
-    }
+    // All rto links go through the batch Browserless resolver — Ekaro can't
+    // decode the rto wrapper itself, so we need the real retailer URL first.
+    var pendingRto = rtoUrl || null;
 
     var deal = {
       source: NAME,
