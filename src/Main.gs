@@ -73,6 +73,10 @@ function runScrape() {
           console.log('Drop (no buyLink): ' + (deal.title || deal.id));
           continue;
         }
+        if (deal.currentPrice != null && deal.currentPrice > 75000) {
+          console.log('Drop (price > ₹75000): ' + (deal.title || deal.id));
+          continue;
+        }
         var affLink = convertAffiliateLink(deal.buyLink);
         if (!affLink) {
           console.log('Drop (affiliate convert failed): ' + (deal.title || deal.id));
