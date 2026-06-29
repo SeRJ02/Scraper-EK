@@ -1,16 +1,11 @@
 // Firecrawl.dev API wrapper.
-//
-// Fetches a JS-rendered page via Firecrawl's headless browser and returns
-// the full HTML. Results are cached in CacheService for CACHE_TTL_SECONDS
-// so repeated scrape cycles don't burn a credit every 30 minutes.
-//
-// At 2-hour cache TTL and 30-min poll: max 12 credits/day = ~360/month,
-// well within the 500-credit free tier.
-//
+// Fetches a JS-rendered page via Firecrawl headless browser and returns HTML.
+// Results are cached for 2 hours so repeated 30-min cycles share one credit.
+// Max usage: 12 credits/day = ~360/month (fits 500-credit free tier).
 // Requires script property: FIRECRAWL_API_TOKEN
 
 var FIRECRAWL_ENDPOINT = 'https://api.firecrawl.dev/v1/scrape';
-var FIRECRAWL_CACHE_TTL = 7200; // 2 hours
+var FIRECRAWL_CACHE_TTL = 7200; // 2 hours in seconds
 
 function firecrawlFetch(targetUrl) {
   var token = PropertiesService.getScriptProperties().getProperty(CONFIG.PROP_FIRECRAWL_TOKEN);
@@ -51,7 +46,7 @@ function firecrawlFetch(targetUrl) {
   }
 
   var html = data.data.html;
-  // CacheService max value is 100KB — truncate silently if larger (still parseable).
+  // CacheService cap is 100KB per entry - truncate if larger.
   var toCache = html.length > 99000 ? html.substring(0, 99000) : html;
   cache.put(cacheKey, toCache, FIRECRAWL_CACHE_TTL);
   return html;
